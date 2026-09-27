@@ -141,7 +141,7 @@ def _codes_in(raw: str) -> set[str]:
     """ISO country codes written as codes: 'DEU-Berlin', 'Zurich, CH', 'BARCELONA, B, ES, 08028'.
 
     ISO3 codes count anywhere. Two-letter codes are ambiguous with region codes
-    ('Geneva, GE, CH', 'Toronto, ON, CA'), so they only count as the first or last
+    ('Bern, BE, CH', 'Toronto, ON, CA'), so they only count as the first or last
     non-numeric part of the location.
     """
     iso3_to_2 = {v: k for k, v in _iso3().items()}
