@@ -31,7 +31,9 @@ class Http:
             },
             timeout=self.cfg.timeout_seconds,
             follow_redirects=True,
-            http2=transport is None,
+            # HTTP/1.1 on purpose: h2 connections shared by many concurrent requests to the same
+            # ATS host (e.g. several Workday tenants) fail with protocol errors.
+            http2=False,
             transport=transport,
         )
         self._sems: dict[str, asyncio.Semaphore] = {}
