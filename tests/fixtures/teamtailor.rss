@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:tt="https://teamtailor.com/locations">
+  <channel>
+    <title>Acme</title>
+    <link>https://careers.acme.test/jobs</link>
+    <item>
+      <title>Product Manager</title>
+      <description>&lt;p&gt;Own the roadmap&lt;/p&gt;</description>
+      <pubDate>Fri, 25 Sep 2026 09:42:48 +0200</pubDate>
+      <link>https://careers.acme.test/jobs/123-product-manager</link>
+      <guid>ff1b8723-4d08-4006-a5f6-3db457e51b82</guid>
+      <tt:locations>
+        <tt:location><tt:name>HQ</tt:name><tt:city>Berlin</tt:city><tt:country>Germany</tt:country></tt:location>
+      </tt:locations>
+    </item>
+  </channel>
+</rss>

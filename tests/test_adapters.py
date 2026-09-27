@@ -226,3 +226,15 @@ async def test_brassring(tmp_path):
     assert jobs[0].locations == ["Berlin, Germany"] and jobs[0].posted_precision == "date"
     assert jobs[0].description == "Own the roadmap" and jobs[0].url.endswith("jobid=1")
     await ctx.http.aclose()
+
+
+@respx.mock
+async def test_teamtailor_custom_domain(tmp_path):
+    respx.get("https://careers.acme.test/jobs.rss").mock(
+        return_value=httpx.Response(200, text=fixture_text("teamtailor.rss")))
+    ctx = ctx_for(tmp_path, type="teamtailor", url="https://careers.acme.test/jobs")
+    jobs = await build_adapter(ctx).fetch()
+    assert jobs[0].url == "https://careers.acme.test/jobs/123-product-manager"
+    assert jobs[0].locations == ["Berlin, Germany"] and jobs[0].description == "Own the roadmap"
+    assert jobs[0].posted_at.day == 25
+    await ctx.http.aclose()

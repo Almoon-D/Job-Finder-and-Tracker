@@ -221,6 +221,8 @@ class Recruitee(Adapter):
 
 @register
 class Teamtailor(Adapter):
+    """Teamtailor career sites, on *.teamtailor.com or on a custom domain (set `type: teamtailor`)."""
+
     type_name = "teamtailor"
 
     @classmethod
@@ -231,22 +233,28 @@ class Teamtailor(Adapter):
         return None
 
     async def fetch(self) -> list[Job]:
-        from selectolax.parser import HTMLParser
+        from xml.etree import ElementTree
 
-        xml = await self.http.get_text(f"https://{self.params['host']}/jobs.rss")
-        tree = HTMLParser(xml)
+        host = self.params.get("host") or urlsplit(self.params.get("url", "")).netloc
+        xml = await self.http.get_text(f"https://{host}/jobs.rss")
+        root = ElementTree.fromstring(xml.encode("utf-8"))
+        tt = "{https://teamtailor.com/locations}"
         out = []
-        for item in tree.css("item"):
-            def txt(tag: str, node=item) -> str:
-                n = node.css_first(tag)
-                return n.text(strip=True) if n else ""
-
-            link = txt("guid") or txt("link")
-            posted, precision = parse_date(txt("pubdate"), self.ctx.now)
-            locs = [n.text(strip=True) for n in item.css("tt\\:location tt\\:city, tt\\:city")] or []
-            out.append(self.job(link.rsplit("/", 1)[-1] or link, txt("title"), link, locations=locs,
-                                posted_at=posted, posted_precision=precision,
-                                description=html_to_text(txt("description"))))
+        for item in root.iter("item"):
+            link = (item.findtext("link") or "").strip()
+            if not link:
+                continue
+            posted, precision = parse_date(item.findtext("pubDate"), self.ctx.now)
+            locs = []
+            for loc in item.iter(f"{tt}location"):
+                parts = [loc.findtext(f"{tt}{k}") for k in ("city", "country")]
+                text = ", ".join(p.strip() for p in parts if p and p.strip())
+                if text:
+                    locs.append(text)
+            native = (item.findtext("guid") or link).strip()
+            out.append(self.job(native, (item.findtext("title") or "").strip(), link,
+                                locations=list(dict.fromkeys(locs)), posted_at=posted, posted_precision=precision,
+                                description=html_to_text(item.findtext("description"))))
         return out
 
 

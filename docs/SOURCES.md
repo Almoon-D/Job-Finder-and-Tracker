@@ -37,7 +37,7 @@ Use `jobfinder detect <url>` to see which adapter handles a URL, and
 | `ashby` | `jobs.ashbyhq.com/<board>` | |
 | `workable` | `apply.workable.com/<account>` | |
 | `recruitee` | `<company>.recruitee.com` | |
-| `teamtailor` | `<company>.teamtailor.com` | |
+| `teamtailor` | `<company>.teamtailor.com` | Custom domain: set `type: teamtailor` and the site `url`. |
 | `personio` | `<company>.jobs.personio.de` | |
 
 ## Job boards
