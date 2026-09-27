@@ -167,3 +167,17 @@ def test_example_config_is_valid():
     cfg = load_config(Path(__file__).parent.parent / "config.example.yaml")
     for s in cfg.sources:
         resolve(s)  # every example source resolves to an adapter
+
+
+@pytest.mark.parametrize(
+    "loc,expected",
+    [
+        ("Lisboa, LI, PT", True),         # region code in the middle is not a country
+        ("Berlin, BE, DE", True),
+        ("HAMBURG, HH, DE, 20095", True),  # trailing postcode ignored
+        ("DE-Munich", True),
+        ("Porto, GE", False),              # Georgia as the final code
+    ],
+)
+def test_iso_codes_in_locations(matcher, loc, expected):
+    assert matcher.match_location(loc) is expected

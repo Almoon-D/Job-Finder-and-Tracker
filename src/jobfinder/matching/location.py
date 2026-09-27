@@ -138,21 +138,25 @@ def _contains(haystack: str, needle: str) -> bool:
 
 
 def _codes_in(raw: str) -> set[str]:
-    """Uppercase ISO codes used as standalone tokens, e.g. 'DEU-Berlin', 'Zurich, CH'."""
+    """ISO country codes written as codes: 'DEU-Berlin', 'Zurich, CH', 'BARCELONA, B, ES, 08028'.
+
+    ISO3 codes count anywhere. Two-letter codes are ambiguous with region codes
+    ('Bern, BE, CH', 'Toronto, ON, CA'), so they only count as the first or last
+    non-numeric part of the location.
+    """
     iso3_to_2 = {v: k for k, v in _iso3().items()}
-    out = set()
-    for tok in re.findall(r"(?<![A-Za-z])[A-Z]{2,3}(?![A-Za-z])", raw):
-        if len(tok) == 2 and tok in country_aliases():
+    out = {iso3_to_2[t] for t in re.findall(r"(?<![A-Za-z])[A-Z]{3}(?![A-Za-z])", raw) if t in iso3_to_2}
+    parts = [p.strip() for p in re.split(r"[,;|/\-]", raw) if p.strip() and not p.strip().isdigit()]
+    for tok in {parts[0], parts[-1]} if parts else set():
+        if re.fullmatch(r"[A-Z]{2}", tok) and tok in country_aliases():
             out.add(tok)
-        elif len(tok) == 3 and tok in iso3_to_2:
-            out.add(iso3_to_2[tok])
     return out
 
 
 def countries_in(raw: str) -> set[str]:
     norm = normalize_text(raw)
     found = {iso2 for iso2, names in country_aliases().items() if any(_contains(norm, n) for n in names)}
-    return found | _codes_in(raw)
+    return found or _codes_in(raw)
 
 
 @dataclass

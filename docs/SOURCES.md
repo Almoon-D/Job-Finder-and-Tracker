@@ -29,6 +29,7 @@ Use `jobfinder detect <url>` to see which adapter handles a URL, and
 | `workday` | `https://<tenant>.wdN.myworkdayjobs.com/<site>` | Picks the site's own location facets for your locations; relative dates ("Posted 3 Days Ago"). |
 | `oracle_hcm` | `https://<host>.oraclecloud.com/hcmUI/CandidateExperience/<lang>/sites/<site>` | Server-side country filter, sorted by posting date. |
 | `eightfold` | `https://<company>.eightfold.ai/careers` | PCSX API, falls back to `/api/apply/v2`. Add `?domain=company.com` if needed. |
+| `brassring` | `https://<host>/TGnewUI/Search/Home/Home?partnerid=<n>&siteid=<n>` | IBM/Infinite BrassRing Talent Gateway; newest first, stops at the age window. |
 | `successfactors` | `https://careerN.successfactors.eu/career?company=<id>` | Legacy XML listing. For RMK sites on a custom domain set `type: successfactors` and `url:` the site root. |
 | `greenhouse` | `boards.greenhouse.io/<board>` or `job-boards.greenhouse.io/<board>` | |
 | `lever` | `jobs.lever.co/<company>` | |
@@ -36,7 +37,7 @@ Use `jobfinder detect <url>` to see which adapter handles a URL, and
 | `ashby` | `jobs.ashbyhq.com/<board>` | |
 | `workable` | `apply.workable.com/<account>` | |
 | `recruitee` | `<company>.recruitee.com` | |
-| `teamtailor` | `<company>.teamtailor.com` | |
+| `teamtailor` | `<company>.teamtailor.com` | Custom domain: set `type: teamtailor` and the site `url`. |
 | `personio` | `<company>.jobs.personio.de` | |
 
 ## Job boards
@@ -52,7 +53,8 @@ of queries low and never use it in the `favorites` group.
   type: linkedin
   queries: [product manager, ux researcher]
   locations: ["Berlin, Germany", Lisbon]    # default: your configured cities and countries
-  company_ids: [1234]                       # optional: LinkedIn company id (f_C)
+  company_ids: [1234, 5678]                 # optional: LinkedIn company ids (f_C); one search covers them all
+                                            # find an id with: jobfinder linkedin-id <company page URL>
   company_names: [Example Bank]             # optional: search by name and keep only that company
   experience_levels: [3, 4]                 # optional f_E filter
   max_pages: 2                              # 10 jobs per page
