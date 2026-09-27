@@ -44,7 +44,7 @@ def load_or_report(config_path: str | None, data_dir: Path, push: bool) -> Confi
         raise
 
 
-def _problems(config: Config, state: State, runner: Runner, sources: list[Source]) -> list[str]:
+def _problems(config: Config, state: State, sources: list[Source]) -> list[str]:
     names = {s.key: s.name for s in sources}
     out = []
     lang = config.language
@@ -79,6 +79,7 @@ async def run(
     push: bool = True,
     bootstrap: bool = False,
     now: datetime | None = None,
+    skip_polling: bool = False,
 ) -> int:
     config = load_or_report(config_path, data_dir, push and not dry_run)
     state = State(data_dir)
@@ -86,6 +87,8 @@ async def run(
     if bootstrap:
         force = True
     due = due_groups(config, state, now, only=groups, force=force)
+    if skip_polling:
+        due = [d for d in due if not config.groups[d.name].interval_minutes]
     group_names = list(config.groups)
     if not due:
         log.info("nothing due")
@@ -144,7 +147,7 @@ async def run(
                 format=group.format,
                 sources_ok=outcome.sources_ok,
                 sources_total=outcome.sources_total,
-                problems=_problems(config, state, runner, config.sources_for_group(d.name)),
+                problems=[] if group.interval_minutes else _problems(config, state, config.sources_for_group(d.name)),
                 max_items=group.max_items,
             )
             if n.empty and not group.notify_empty and not n.problems:

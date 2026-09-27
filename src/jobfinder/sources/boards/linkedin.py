@@ -101,7 +101,8 @@ class LinkedIn(Adapter):
         return jobs
 
     async def fetch(self) -> list[Job]:
-        pages = min(self.source.max_pages, int(self.params.get("max_pages", 3)))
+        # LinkedIn rate-limits: default to 3 pages unless the source sets max_pages explicitly.
+        pages = self.source.max_pages if "max_pages" in self.source.model_fields_set else 3
         names = [str(n) for n in self.params.get("company_names") or []]
         queries = self.search_terms() or ([""] if self.params.get("company_ids") else [])
         jobs: list[Job] = []

@@ -89,7 +89,7 @@ jobs:
           case "$MODE" in
             run)
               [ "$FORCE" = "true" ] && args+=(--force)
-              uv run --no-sync jobfinder run "${args[@]}" ;;
+              uv run --no-sync jobfinder run --skip-polling "${args[@]}" ;;
             dry-run)     uv run --no-sync jobfinder dry-run "${args[@]}" ;;
             bootstrap)   uv run --no-sync jobfinder bootstrap "${args[@]}" ;;
             test-notify) uv run --no-sync jobfinder test-notify --data-dir data ;;

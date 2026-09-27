@@ -38,6 +38,16 @@ jobs:
       - name: Install
         run: uv sync --frozen --no-dev --extra apprise
 
+      - name: Browser needed?
+        id: browser
+        run: uv run --no-sync jobfinder needs-browser --data-dir data --groups favorites
+
+      - name: Install headless browser
+        if: steps.browser.outputs.browser == 'true'
+        run: |
+          uv sync --frozen --no-dev --extra apprise --extra browser
+          uv run --no-sync playwright install --with-deps chromium
+
       - name: Run favourites
         env:
           JOBFINDER_SECRETS: ${{ toJSON(secrets) }}

@@ -54,6 +54,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--force", action="store_true", help="run the groups even if not due")
     p.add_argument("--dry-run", action="store_true", help="do not notify, save state or push")
     p.add_argument("--no-push", action="store_true", help="save state locally but do not push")
+    p.add_argument("--skip-polling", action="store_true",
+                   help="ignore interval (polling) groups; they have their own workflow")
 
     p = sub.add_parser("dry-run", help="alias of: run --force --dry-run")
     _common(p)
@@ -83,6 +85,7 @@ def main(argv: list[str] | None = None) -> int:
 
     p = sub.add_parser("needs-browser", help="print whether any enabled source needs Playwright")
     _common(p)
+    p.add_argument("--groups")
 
     args = parser.parse_args(argv)
     _load_secrets_json()
@@ -101,6 +104,7 @@ def main(argv: list[str] | None = None) -> int:
                 dry_run=getattr(args, "dry_run", False) or args.cmd == "dry-run",
                 push=not getattr(args, "no_push", False),
                 bootstrap=args.cmd == "bootstrap",
+                skip_polling=getattr(args, "skip_polling", False),
             ))
         if args.cmd == "validate-config":
             return _validate(args.config, data_dir)
@@ -122,7 +126,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.cmd == "needs-browser":
             from .tools import needs_browser
 
-            return needs_browser(args.config, data_dir)
+            return needs_browser(args.config, data_dir, _groups(args.groups))
     except ConfigError:
         return 2
     return 1

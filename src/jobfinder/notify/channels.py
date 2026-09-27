@@ -162,7 +162,8 @@ class Email(Channel):
         context = ssl.create_default_context()
         if port == 465:
             with smtplib.SMTP_SSL(host, port, context=context, timeout=60) as s:
-                s.login(user, password)
+                if user:
+                    s.login(user, password)
                 s.send_message(msg)
             return
         with smtplib.SMTP(host, port, timeout=60) as s:
@@ -222,6 +223,8 @@ class Ntfy(Channel):
         if n.format == "per_job" and n.jobs and len(n.shown) <= 10:
             for j in n.shown:
                 await self._post(server, topic, n.job_heading(j), "\n".join(n.job_meta(j)), prio, j.url, token)
+            if n.hidden_count or n.problems:
+                await self._post(server, topic, n.title, "\n".join(footer_lines(n)), 2, None, token)
             return
         lines = [f"- [{n.job_heading(j)}]({j.url}) · {n.when(j)}" for j in n.shown]
         body = "\n".join(lines + [""] + footer_lines(n))

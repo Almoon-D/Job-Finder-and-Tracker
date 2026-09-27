@@ -16,6 +16,7 @@ from typing import Any
 from .models import Job, Verdict
 
 PRUNE_AFTER_DAYS = 90
+MAX_PERSISTED_STREAK = 5
 
 
 def now_utc() -> datetime:
@@ -209,7 +210,9 @@ class State:
     def record_source_result(self, key: str, ok: bool, count: int, error: str | None, now: datetime) -> None:
         info = self.source_info(key)
         previous = int(info.get("fail_streak", 0))
-        if ok != (previous == 0):
+        # Recovering, or failing for the first few times, is worth committing even in polling runs;
+        # after that the streak stops growing on disk so a broken source does not commit every 10 min.
+        if (ok and previous) or (not ok and previous < MAX_PERSISTED_STREAK):
             self.material = True
         if ok:
             info["fail_streak"] = 0

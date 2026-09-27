@@ -205,3 +205,32 @@ async def test_bootstrap_marks_seen_without_notifying(tmp_path):
     state = State(tmp_path)
     assert len(state.seen) == len(JOBS)
     assert all(not v["notified"] for v in state.seen.values())
+
+
+@respx.mock
+async def test_shared_failing_source_counted_once(tmp_path):
+    respx.post(url__startswith="https://api.telegram.org/").mock(return_value=httpx.Response(200, json={"ok": True}))
+    write_config(tmp_path, jobs=[], favorite=True)
+    cfg = (tmp_path / "config.yaml").read_text().replace("type: fake", "type: fake\n    fail: true")
+    (tmp_path / "config.yaml").write_text(cfg)
+    await run(None, tmp_path, groups=["favorites", "company_sites"], now=NOW)
+    assert State(tmp_path).runs["sources"]["secret-corp"]["fail_streak"] == 1
+
+
+async def test_skip_polling_ignores_interval_groups(tmp_path):
+    write_config(tmp_path, jobs=[], favorite=True)
+    FakeAdapter.calls = 0
+    await run(None, tmp_path, now=NOW + timedelta(hours=10), skip_polling=True)  # 19:30: nothing scheduled
+    assert FakeAdapter.calls == 0
+
+
+@respx.mock
+async def test_failing_source_streak_persists_in_polling_runs(tmp_path):
+    respx.post(url__startswith="https://api.telegram.org/").mock(return_value=httpx.Response(200, json={"ok": True}))
+    write_config(tmp_path, jobs=[], favorite=True)
+    cfg = (tmp_path / "config.yaml").read_text().replace("type: fake", "type: fake\n    fail: true")
+    (tmp_path / "config.yaml").write_text(cfg)
+    for i in range(3):
+        await run(None, tmp_path, groups=["favorites"], now=NOW + timedelta(minutes=10 * i))
+    assert State(tmp_path).runs["sources"]["secret-corp"]["fail_streak"] == 3
+    assert telegram_texts() == []  # polling groups never send health-only messages

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -49,6 +50,7 @@ class Runner:
         self.criteria = criteria_hash(config)
         self._cache: dict[tuple[str, float], tuple[SourceResult, Adapter | None]] = {}
         self._index = {s.key: i + 1 for i, s in enumerate(config.sources)}
+        self._recorded: set[str] = set()
 
     # ------------------------------------------------------------ sources
     def source_label(self, source: Source) -> str:
@@ -106,7 +108,9 @@ class Runner:
 
         candidates: list[tuple[Job, Source, Adapter]] = []
         for source, (result, adapter) in zip(sources, results, strict=True):
-            self.state.record_source_result(source.key, result.ok, len(result.jobs), result.error, self.now)
+            if source.key not in self._recorded:  # a source shared by two groups counts once per run
+                self._recorded.add(source.key)
+                self.state.record_source_result(source.key, result.ok, len(result.jobs), result.error, self.now)
             label = self.source_label(source)
             if not result.ok:
                 log.info(f"  {label} ({result.source_type}): error after {result.duration:.1f}s")
@@ -116,7 +120,10 @@ class Runner:
             out.fetched += len(result.jobs)
             log.info(f"  {label} ({result.source_type}): {len(result.jobs)} jobs in {result.duration:.1f}s")
             first_run = not self.state.is_bootstrapped(source.key)
-            for job in result.jobs:
+            for shared in result.jobs:
+                # Fetch results are cached across groups: work on a per-group copy.
+                job = dataclasses.replace(shared, extra={k: v for k, v in shared.extra.items() if k != "duplicates"},
+                                          also_on=[])
                 self.state.observe(job, self.now)
                 if self.bootstrap:
                     self.state.mark_baseline(job)
@@ -247,7 +254,9 @@ class Runner:
                 first = by_fp[fp]
                 if source.name not in first.also_on and normalize_text(source.name) != normalize_text(first.company):
                     first.also_on.append(source.name)
-                first.extra.setdefault("duplicates", []).append(job)
+                dups = first.extra.setdefault("duplicates", [])
+                if all(d is not job for d in dups):
+                    dups.append(job)
                 out.reject("duplicate")
                 continue
             if self.state.fingerprint_notified(fp, group, exclude_key=job.key):

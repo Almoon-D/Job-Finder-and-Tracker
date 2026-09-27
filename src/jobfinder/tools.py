@@ -61,9 +61,10 @@ async def test_source(args: argparse.Namespace, data_dir: Path) -> int:
     return 0
 
 
-def needs_browser(config_path: str | None, data_dir: Path) -> int:
+def needs_browser(config_path: str | None, data_dir: Path, groups: list[str] | None = None) -> int:
     config = load_config(config_path, data_dir)
-    needed = any(s.enabled and s.params().get("fetch") == "browser" for s in config.sources)
+    selected = [s for g in groups for s in config.sources_for_group(g)] if groups else config.sources
+    needed = any(s.enabled and s.params().get("fetch") == "browser" for s in selected)
     out = os.environ.get("GITHUB_OUTPUT")
     if out:
         with open(out, "a", encoding="utf-8") as fh:
