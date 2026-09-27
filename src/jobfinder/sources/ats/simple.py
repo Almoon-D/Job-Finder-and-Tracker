@@ -101,7 +101,12 @@ class SmartRecruiters(Adapter):
     async def fetch(self) -> list[Job]:
         out: list[Job] = []
         company = self.params["company"]
-        countries = [c.lower() for c in self.ctx.locations.countries()] or [None]
+        # With coverage matching we need every posting (a role abroad may cover your market);
+        # otherwise let the API filter by country.
+        coverage = self.ctx.config.coverage
+        use_country_filter = not (coverage.enabled and coverage.text_any)
+        countries = [c.lower() for c in self.ctx.locations.countries()] if use_country_filter else []
+        countries = countries or [None]
         for country in countries:
             for page in range(self.source.max_pages):
                 params: dict[str, Any] = {"limit": 100, "offset": page * 100}
@@ -113,7 +118,8 @@ class SmartRecruiters(Adapter):
                 for j in content:
                     posted, precision = parse_date(j.get("releasedDate"), self.ctx.now)
                     loc = j.get("location") or {}
-                    loc_text = ", ".join(x for x in (loc.get("city"), loc.get("region"), loc.get("country")) if x)
+                    loc_text = loc.get("fullLocation") or ", ".join(
+                        x for x in (loc.get("city"), loc.get("region"), loc.get("country")) if x)
                     if loc.get("remote"):
                         loc_text = f"Remote, {loc_text}"
                     job = self.job(j.get("id"), j.get("name", ""),

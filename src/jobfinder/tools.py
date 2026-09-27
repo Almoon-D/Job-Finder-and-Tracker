@@ -71,3 +71,21 @@ def needs_browser(config_path: str | None, data_dir: Path, groups: list[str] | N
             fh.write(f"browser={'true' if needed else 'false'}\n")
     print("true" if needed else "false")
     return 0
+
+
+async def linkedin_company_id(ref: str) -> int:
+    """Print the numeric LinkedIn company id (for `company_ids`) of a company page or slug."""
+    import re
+    from urllib.parse import quote
+
+    slug = ref.rstrip("/").split("/company/")[-1].split("/")[0] if "/company/" in ref else ref.strip("/")
+    async with Http() as http:
+        page = await http.get_text(f"https://www.linkedin.com/company/{quote(slug)}/")
+    m = re.search(r"urn:li:organization:(\d+)", page)
+    if not m:
+        print("id not found (check the company page URL)")
+        return 1
+    title = re.search(r"<title>([^<|]*)", page)
+    name = "" if log.in_ci() or not title else f"  # {title.group(1).strip()}"
+    print(f"{m.group(1)}{name}")
+    return 0

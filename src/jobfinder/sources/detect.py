@@ -9,7 +9,7 @@ from .base import REGISTRY, AdapterError
 
 # Order matters only for URLs several adapters could claim.
 DETECT_ORDER = ["workday", "oracle_hcm", "eightfold", "greenhouse", "lever", "smartrecruiters", "ashby",
-                "workable", "recruitee", "teamtailor", "personio", "successfactors"]
+                "workable", "recruitee", "teamtailor", "personio", "successfactors", "brassring"]
 
 
 def detect_url(url: str) -> tuple[str, dict[str, Any]] | None:

@@ -83,6 +83,9 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("detect", help="show which adapter handles a careers URL")
     p.add_argument("url")
 
+    p = sub.add_parser("linkedin-id", help="print the LinkedIn company id of a company page (for company_ids)")
+    p.add_argument("company", help="https://www.linkedin.com/company/<slug>/ or just <slug>")
+
     p = sub.add_parser("needs-browser", help="print whether any enabled source needs Playwright")
     _common(p)
     p.add_argument("--groups")
@@ -123,6 +126,10 @@ def main(argv: list[str] | None = None) -> int:
             found = detect_url(args.url)
             print(f"{found[0]}: {found[1]}" if found else "unknown: set 'type' explicitly (json_api, html_list...)")
             return 0 if found else 1
+        if args.cmd == "linkedin-id":
+            from .tools import linkedin_company_id
+
+            return asyncio.run(linkedin_company_id(args.company))
         if args.cmd == "needs-browser":
             from .tools import needs_browser
 

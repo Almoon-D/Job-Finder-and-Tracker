@@ -204,3 +204,25 @@ async def test_page_monitor(tmp_path):
     jobs = await build_adapter(ctx).fetch()
     assert [j.title for j in jobs] == ["UX Analyst"]
     await ctx.http.aclose()
+
+
+@respx.mock
+async def test_brassring(tmp_path):
+    base = "https://careers.example.test"
+    respx.get(f"{base}/TGnewUI/Search/Home/Home").mock(
+        return_value=httpx.Response(200, text=fixture_text("brassring_home.html")))
+    first = respx.post(f"{base}/TgNewUI/Search/Ajax/PowerSearchJobs").mock(
+        return_value=httpx.Response(200, text=fixture_text("brassring_page1.json")))
+    respx.post(f"{base}/TgNewUI/Search/Ajax/ProcessSortAndShowMoreJobs").mock(
+        return_value=httpx.Response(200, text=fixture_text("brassring_page2.json")))
+    url = f"{base}/TGnewUI/Search/Home/Home?partnerid=111&siteid=222"
+    assert detect_url(url)[0] == "brassring"
+    ctx = ctx_for(tmp_path, url=url)
+    jobs = await build_adapter(ctx).fetch()
+    sent = json.loads(first.calls[0].request.content)
+    assert sent["encryptedSessionValue"] == "enc-123" and sent["SortType"] == "LastUpdated"
+    assert first.calls[0].request.headers["RFT"] == "tok-abc"
+    assert [j.title for j in jobs] == ["Product Manager", "Data Analyst", "Old role"]
+    assert jobs[0].locations == ["Berlin, Germany"] and jobs[0].posted_precision == "date"
+    assert jobs[0].description == "Own the roadmap" and jobs[0].url.endswith("jobid=1")
+    await ctx.http.aclose()
