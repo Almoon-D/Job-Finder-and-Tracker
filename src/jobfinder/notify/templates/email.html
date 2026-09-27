@@ -1,0 +1,24 @@
+<!doctype html>
+<html>
+<body style="margin:0;padding:16px;background:#f4f5f7;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#1d2433">
+  <div style="max-width:720px;margin:0 auto;background:#ffffff;border-radius:8px;padding:20px">
+    <h2 style="margin:0 0 12px 0;font-size:18px">{{ n.title }}</h2>
+    {% if n.test %}
+      <p>{{ t('test_body') }}</p>
+    {% endif %}
+    {% for job in n.shown %}
+      <div style="border-top:1px solid #e5e7eb;padding:12px 0">
+        <div style="font-size:15px;font-weight:600">
+          <a href="{{ job.url }}" style="color:#1a56db;text-decoration:none">{{ n.job_heading(job) }}</a>
+        </div>
+        {% for line in n.job_meta(job) %}
+          <div style="font-size:13px;color:#4b5563;margin-top:2px">{{ line }}</div>
+        {% endfor %}
+      </div>
+    {% endfor %}
+    <div style="border-top:1px solid #e5e7eb;padding-top:10px;font-size:12px;color:#6b7280">
+      {% for line in footer %}<div>{{ line }}</div>{% endfor %}
+    </div>
+  </div>
+</body>
+</html>

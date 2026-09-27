@@ -1,0 +1,15 @@
+{"total": 3, "jobPostings": [
+  {"title": "Product Manager - DACH", "externalPath": "/job/Berlin/Product-Manager---DACH_R100", "locationsText": "Berlin, Germany", "postedOn": "Posted Today", "bulletFields": ["R100"]},
+  {"title": "Data Analyst", "externalPath": "/job/Lisbon/Data-Analyst_R101", "locationsText": "2 Locations", "postedOn": "Posted 2 Days Ago", "bulletFields": ["R101"]},
+  {"title": "Software Engineer", "externalPath": "/job/Berlin/Software-Engineer_R102", "locationsText": "Berlin, Germany", "postedOn": "Posted 30+ Days Ago", "bulletFields": ["R102"]}
+ ],
+ "facets": [
+  {"facetParameter": "locationMainGroup", "values": [
+    {"facetParameter": "locations", "descriptor": "Locations", "values": [
+      {"descriptor": "Berlin, Germany", "id": "loc-ber", "count": 2},
+      {"descriptor": "Lisbon", "id": "loc-lis", "count": 1},
+      {"descriptor": "London, United Kingdom", "id": "loc-lon", "count": 40}
+    ]}
+  ]},
+  {"facetParameter": "jobFamilyGroup", "values": [{"descriptor": "Sales", "id": "fam-1", "count": 3}]}
+ ]}

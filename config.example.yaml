@@ -1,0 +1,125 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  Example configuration. Copy it to YOUR PRIVATE data repository as config.yaml
+#  and edit it there. Never commit your real config to the public repository.
+#  All companies below are fictional placeholders.
+# ─────────────────────────────────────────────────────────────────────────────
+version: 1
+timezone: Europe/Berlin          # IANA name; schedules below use this local time
+language: en                     # notifications language: en | es
+
+# Anonymous description used by the (optional) AI matcher. No names or contact data.
+profile: |
+  6 years of experience as a data analyst in e-commerce; recently certified Scrum product owner.
+  Looking for product management roles in B2B software.
+
+# What you are looking for. The AI uses names/descriptions; keywords are the
+# filter when the AI is disabled or unavailable.
+role_families:
+  - name: product
+    description: Product manager / product owner roles (not project management or sales).
+    include_any: [product manager, product owner, produktmanager, gestor de producto, chef de produit]
+  - name: analytics
+    description: Senior data / product analytics roles.
+    include_any: [data analyst, product analyst, analytics lead]
+
+filters:
+  exclude_title_any: [sales, recruiter, engineer, developer, intern*, internship, trainee, working student]
+  exclude_text_any: []
+  require_keyword_match: null    # null = only when the AI is off
+
+experience:
+  min_years: 4
+  max_years: 8
+  hard: false
+
+# Countries (ISO code or name) and/or cities. Add as many as you like.
+locations:
+  - {country: DE}
+  - {city: Lisbon, country: PT}
+  - {city: Toronto, country: CA, aliases: [GTA]}
+
+# Jobs based elsewhere that mention your market ("DACH market, based in London").
+coverage:
+  enabled: true
+  text_any: [DACH, German-speaking market]
+  search_terms: [DACH]
+  only_cities: []
+
+groups:
+  favorites:                     # near real-time alerts (external trigger every 10 min)
+    interval_minutes: 10
+    quiet_hours: "23:00-07:00"
+    format: per_job
+    priority: high
+    notify_empty: false
+  company_sites:                 # company career sites, twice a day
+    times: ["09:00", "20:30"]
+    max_age_days: 3
+    format: per_job
+  boards:                        # job boards, every 3 days
+    times: ["11:00"]
+    every_days: 3
+    max_age_days: 3.5
+  recruiters:                    # recruiters / headhunters, every 3 days
+    times: ["11:00"]
+    every_days: 3
+    max_age_days: 3.5
+
+sources:
+  # Paste a careers URL: the adapter is detected automatically for Workday,
+  # Oracle HCM, Eightfold, Greenhouse, Lever, SmartRecruiters, Ashby, Workable,
+  # Recruitee, Teamtailor, Personio and SuccessFactors (legacy portal).
+  - name: Example Software
+    url: https://examplesoftware.wd3.myworkdayjobs.com/External
+    favorite: true
+  - name: Example Marketplace
+    url: https://boards.greenhouse.io/examplemarketplace
+
+  # Any other site: declarative recipes (see docs/SOURCES.md)
+  - name: Example Startup (custom JSON API)
+    type: json_api
+    url: https://careers.example-startup.test/api/jobs?page={page}&q={query}
+    items: "results"
+    fields: {id: id, title: title, url: url, location: city, posted_at: published}
+    pagination: {type: page, start: 1, limit: 20, max_pages: 3}
+  - name: Example Studio
+    type: page_monitor
+    url: https://example-studio.test/careers
+    link_pattern: "/careers/.+"
+
+  # LinkedIn public search (no login). Keep queries few; never in 'favorites'.
+  - name: LinkedIn
+    group: boards
+    type: linkedin
+    queries: [product manager, product owner]
+    max_pages: 2
+
+  # Recruiter with schema.org JobPosting pages listed in its sitemap
+  - name: Example Recruiter
+    group: recruiters
+    type: jsonld_sitemap
+    url: https://recruiter.example.test/sitemap.xml
+    url_pattern: "/jobs/"
+
+llm:
+  enabled: true                  # without an API key it silently falls back to keywords
+  min_score: 60
+  providers:                     # any OpenAI-compatible API, tried in order
+    - name: gemini
+      base_url: https://generativelanguage.googleapis.com/v1beta/openai
+      model: gemini-3.5-flash-lite
+      api_key_env: GEMINI_API_KEY
+    - name: groq
+      base_url: https://api.groq.com/openai/v1
+      model: openai/gpt-oss-120b
+      api_key_env: GROQ_API_KEY
+
+notify:                          # credentials always come from GitHub Secrets
+  telegram: {enabled: true}
+  discord: {enabled: false}
+  email: {enabled: false}
+  ntfy: {enabled: false}
+  apprise: {enabled: false}
+
+feeds:
+  enabled: true

@@ -216,3 +216,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# jobfinder: never commit personal data to the public repository
+/config.yaml
+/data/
+*.local.yaml
+.env

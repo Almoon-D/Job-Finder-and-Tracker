@@ -1,0 +1,114 @@
+# Main workflow: company sites (twice a day), job boards and recruiters (every few days).
+# Schedules live in YOUR private config; the cron lines below only wake the workflow up.
+# The run is idempotent: whatever wakes it (this cron, cron-job.org, a manual run)
+# a group runs at most once per slot. See docs/SETUP.es.md.
+name: jobfinder
+
+on:
+  schedule:
+    - cron: "0 9 * * *"
+      timezone: "Europe/Madrid"
+    - cron: "30 20 * * *"
+      timezone: "Europe/Madrid"
+    - cron: "0 11 * * *"
+      timezone: "Europe/Madrid"
+    - cron: "0 18 * * 0"
+      timezone: "Europe/Madrid"
+    # Safety tick: catches slots GitHub skipped or delayed (runs only what is due).
+    - cron: "17 */2 * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "run | dry-run | test-notify | bootstrap | validate"
+        type: choice
+        options: [run, dry-run, test-notify, bootstrap, validate]
+        default: run
+      groups:
+        description: "Only these groups (comma separated, optional)"
+        type: string
+        default: ""
+      force:
+        description: "Run the groups even if they are not due"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jobfinder-main
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check setup
+        if: vars.DATA_REPO == ''
+        run: |
+          echo "::error::Set the repository variable DATA_REPO (owner/private-repo) and the secret DATA_REPO_TOKEN. See docs/SETUP.es.md"
+          exit 1
+
+      - uses: actions/checkout@v5
+
+      - name: Checkout private data repository
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ vars.DATA_REPO }}
+          token: ${{ secrets.DATA_REPO_TOKEN }}
+          path: data
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          python-version: "3.12"
+
+      - name: Install
+        run: uv sync --frozen --no-dev --extra apprise
+
+      - name: Browser needed?
+        id: browser
+        run: uv run --no-sync jobfinder needs-browser --data-dir data
+
+      - name: Install headless browser
+        if: steps.browser.outputs.browser == 'true'
+        run: |
+          uv sync --frozen --no-dev --extra apprise --extra browser
+          uv run --no-sync playwright install --with-deps chromium
+
+      - name: Run
+        env:
+          JOBFINDER_SECRETS: ${{ toJSON(secrets) }}
+          MODE: ${{ inputs.mode || 'run' }}
+          ONLY_GROUPS: ${{ inputs.groups }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          args=(--data-dir data)
+          [ -n "$ONLY_GROUPS" ] && args+=(--groups "$ONLY_GROUPS")
+          case "$MODE" in
+            run)
+              [ "$FORCE" = "true" ] && args+=(--force)
+              uv run --no-sync jobfinder run "${args[@]}" ;;
+            dry-run)     uv run --no-sync jobfinder dry-run "${args[@]}" ;;
+            bootstrap)   uv run --no-sync jobfinder bootstrap "${args[@]}" ;;
+            test-notify) uv run --no-sync jobfinder test-notify --data-dir data ;;
+            validate)    uv run --no-sync jobfinder validate-config --data-dir data ;;
+            *) echo "::error::unknown mode"; exit 1 ;;
+          esac
+
+  # Public repos disable scheduled workflows after 60 days without activity.
+  # State commits go to the private repo, so re-enable the workflows every week.
+  keepalive:
+    if: github.event_name == 'schedule' && github.event.schedule == '0 18 * * 0'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Keep scheduled workflows enabled
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for wf in jobfinder.yml favorites.yml; do
+            gh api -X PUT "repos/${{ github.repository }}/actions/workflows/$wf/enable" || true
+          done

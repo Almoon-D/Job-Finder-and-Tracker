@@ -1,0 +1,4 @@
+{"items": [{"TotalJobsCount": 2, "requisitionList": [
+  {"Id": "9001", "Title": "Product Manager, Payments, Germany", "PostedDate": "2026-09-26", "PrimaryLocation": "Berlin, Germany", "secondaryLocations": [], "ShortDescriptionStr": "Own the checkout roadmap"},
+  {"Id": "9002", "Title": "Old role", "PostedDate": "2026-08-01", "PrimaryLocation": "Berlin, Germany", "secondaryLocations": [{"Name": "Hamburg, Germany"}]}
+]}]}
