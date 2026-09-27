@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Job-Listing>
+<Job>
+<JobTitle><![CDATA[Product Owner DACH]]></JobTitle>
+<Job-Description><![CDATA[<p>Serve German clients</p>]]></Job-Description>
+<ReqId>123</ReqId>
+<filter1><label>Country</label><value>Portugal</value></filter1>
+<filter2><label>City</label><value>Lisbon</value></filter2>
+</Job>
+</Job-Listing>

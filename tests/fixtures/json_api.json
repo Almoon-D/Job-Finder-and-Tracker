@@ -1,0 +1,4 @@
+{"data": {"roles": {"total": 2, "items": [
+  {"roleId": "A1", "jobTitle": "Product Lead", "locations": [{"city": "Berlin", "country": "Germany"}]},
+  {"roleId": "A2", "jobTitle": "Backend Engineer", "locations": [{"city": null, "country": "United States"}]}
+]}}}

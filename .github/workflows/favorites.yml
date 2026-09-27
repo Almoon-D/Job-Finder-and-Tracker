@@ -1,0 +1,54 @@
+# Favourite companies: near real-time alerts.
+# Trigger it every 10 minutes from an external scheduler (cron-job.org → workflow_dispatch),
+# because GitHub's own cron can be hours late. The cron below is only a fallback.
+name: favorites
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/30 * * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jobfinder-favorites
+  cancel-in-progress: false
+
+jobs:
+  run:
+    if: vars.DATA_REPO != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Checkout private data repository
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ vars.DATA_REPO }}
+          token: ${{ secrets.DATA_REPO_TOKEN }}
+          path: data
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          python-version: "3.12"
+
+      - name: Install
+        run: uv sync --frozen --no-dev --extra apprise
+
+      - name: Browser needed?
+        id: browser
+        run: uv run --no-sync jobfinder needs-browser --data-dir data --groups favorites
+
+      - name: Install headless browser
+        if: steps.browser.outputs.browser == 'true'
+        run: |
+          uv sync --frozen --no-dev --extra apprise --extra browser
+          uv run --no-sync playwright install --with-deps chromium
+
+      - name: Run favourites
+        env:
+          JOBFINDER_SECRETS: ${{ toJSON(secrets) }}
+        run: uv run --no-sync jobfinder run --data-dir data --groups favorites
