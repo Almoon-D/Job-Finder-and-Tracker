@@ -219,6 +219,12 @@ class LLMConfig(_Model):
     max_calls_per_run: int = Field(30, ge=1)
     description_chars: int = Field(1800, ge=200)
     timeout_seconds: float = 90
+    max_provider_failures: int = Field(
+        2, ge=1, description="A provider that fails this many requests in a row is skipped for the rest of the run."
+    )
+    max_seconds_per_run: float = Field(
+        600, gt=0, description="AI time budget of one run, checked between requests; after it the remaining jobs use keyword rules."
+    )
     temperature: float = 0.1
     extra_instructions: str = ""
 

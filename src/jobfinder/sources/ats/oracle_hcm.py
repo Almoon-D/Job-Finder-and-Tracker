@@ -13,6 +13,7 @@ from ..base import Adapter, register
 from ..util import html_to_text
 
 _SITE = re.compile(r"/hcmUI/CandidateExperience/(?P<lang>[\w-]+)/sites/(?P<site>[\w-]+)", re.I)
+_HOST = re.compile(r"\.oraclecloud\.[a-z]{2,3}$", re.I)  # .com, .eu, ... (regional data centres: fa.ocs.oraclecloud.eu)
 PAGE = 25
 
 
@@ -25,7 +26,7 @@ class OracleHCM(Adapter):
     def detect(cls, url: str) -> dict[str, Any] | None:
         parts = urlsplit(url)
         m = _SITE.search(parts.path)
-        if m and "oraclecloud.com" in parts.netloc:
+        if m and _HOST.search(parts.hostname or ""):
             return {"host": parts.netloc, "site": m["site"], "lang": m["lang"]}
         return None
 
