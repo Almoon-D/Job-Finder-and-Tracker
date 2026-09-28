@@ -1,0 +1,36 @@
+From: LinkedIn Job Alerts <jobalerts-noreply@linkedin.com>
+To: alerts@example.test
+Subject: Private banker: 2 new jobs
+Date: Sat, 26 Sep 2026 08:15:00 +0000
+MIME-Version: 1.0
+Content-Type: multipart/alternative;
+ boundary="===============6743769171457846626=="
+
+--===============6743769171457846626==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+See the HTML version.
+
+--===============6743769171457846626==
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+MIME-Version: 1.0
+
+
+<html><body><table>
+<tr><td><a href=3D"https://www.linkedin.com/comm/jobs/view/4000000001/?tracki=
+ngId=3Dxyz&refId=3Dabc&midToken=3Dq"><img src=3D"logo.png"></a></td>
+<td><a href=3D"https://www.linkedin.com/comm/jobs/view/4000000001/?trackingId=
+=3Dxyz">Senior Private Banker</a>
+<p>Acme Private Bank =C2=B7 Madrid, Community of Madrid, Spain</p></td></tr>
+<tr><td><a href=3D"https://www.linkedin.com/comm/jobs/view/4000000002/?tracki=
+ngId=3Dzzz">Wealth Planner</a>
+<p>Globex Wealth</p><p>Geneva, Switzerland</p></td></tr>
+<tr><td><a href=3D"https://www.linkedin.com/comm/jobs/search/?keywords=3Dpriv=
+ate">See all jobs</a>
+<a href=3D"https://www.linkedin.com/comm/psettings/job-alerts">Unsubscribe</a=
+></td></tr>
+</table></body></html>
+
+--===============6743769171457846626==--

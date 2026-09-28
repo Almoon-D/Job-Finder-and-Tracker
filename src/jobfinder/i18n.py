@@ -31,6 +31,9 @@ MESSAGES = {
         "test_title": "Prueba de notificación",
         "test_body": "Si lees esto, el canal funciona correctamente.",
         "view": "Ver oferta",
+        "other": "Otros puestos",
+        "coverage_place": "Cobertura",
+        "elsewhere": "🔁 {n} ya avisadas en otros grupos (no se repiten)",
     },
     "en": {
         "new_jobs": "{n} new jobs",
@@ -55,6 +58,9 @@ MESSAGES = {
         "test_title": "Notification test",
         "test_body": "If you can read this, the channel works.",
         "view": "View job",
+        "other": "Other roles",
+        "coverage_place": "Coverage",
+        "elsewhere": "🔁 {n} already sent in other groups (not repeated)",
     },
 }
 

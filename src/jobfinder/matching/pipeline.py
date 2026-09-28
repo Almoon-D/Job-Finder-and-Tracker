@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from .. import log
 from ..config.schema import Config, Group, Source
 from ..models import Job, SourceResult, Verdict, normalize_text
-from ..sources.base import Adapter, FetchContext, build_adapter
+from ..sources.base import Adapter, FetchContext, SkipSource, build_adapter
 from ..sources.http import Http
 from ..state import State
 from .llm import LLMMatcher, criteria_hash
@@ -33,6 +33,7 @@ class GroupOutcome:
     candidates: int = 0
     scored_by_ai: int = 0
     rejected: dict[str, int] = field(default_factory=dict)
+    also_elsewhere: int = 0  # matches already notified in another group (not repeated)
 
     def reject(self, reason: str) -> None:
         self.rejected[reason] = self.rejected.get(reason, 0) + 1
@@ -61,13 +62,16 @@ class Runner:
         cache_key = (source.key, max_age)
         if cache_key in self._cache:
             return self._cache[cache_key]
-        ctx = FetchContext(self.http, self.config, source, self.state, self.now, self.locations, max_age)
+        ctx = FetchContext(self.http, self.config, source, self.state, self.now, self.locations, max_age, self.llm)
         started = time.monotonic()
         adapter: Adapter | None = None
         try:
             adapter = build_adapter(ctx)
             jobs = await asyncio.wait_for(adapter.fetch(), timeout=self.config.http.source_timeout_seconds)
             result = SourceResult(source.key, adapter.type_name, jobs, None, time.monotonic() - started)
+        except SkipSource as exc:
+            kind = adapter.type_name if adapter else (source.type or "?")
+            result = SourceResult(source.key, kind, [], None, time.monotonic() - started, skipped=str(exc))
         except Exception as exc:  # one broken source must never break the run
             kind = adapter.type_name if adapter else (source.type or "?")
             msg = f"{type(exc).__name__}: {exc}"[:300]
@@ -97,21 +101,25 @@ class Runner:
             return True
         ok, via_coverage = self.locations.matches(job.locations, f"{job.title} {job.description}")
         job.coverage_match = via_coverage
+        job.extra["target"] = self.locations.target_label(job.locations)  # locations may come from enrich()
         return ok
 
     # ----------------------------------------------------------------- run
     async def run_group(self, name: str, group: Group) -> GroupOutcome:
         out = GroupOutcome(name, group)
         sources = self.config.sources_for_group(name)
-        out.sources_total = len(sources)
         results = await asyncio.gather(*(self.fetch_source(s, group.max_age_days) for s in sources))
 
         candidates: list[tuple[Job, Source, Adapter]] = []
         for source, (result, adapter) in zip(sources, results, strict=True):
+            label = self.source_label(source)
+            if result.skipped:  # expected (e.g. optional credentials not set): neither ok nor a failure
+                log.info(f"  {label} ({result.source_type}): skipped ({result.skipped})")
+                continue
+            out.sources_total += 1
             if source.key not in self._recorded:  # a source shared by two groups counts once per run
                 self._recorded.add(source.key)
                 self.state.record_source_result(source.key, result.ok, len(result.jobs), result.error, self.now)
-            label = self.source_label(source)
             if not result.ok:
                 log.info(f"  {label} ({result.source_type}): error after {result.duration:.1f}s")
                 log.detail(f"{source.name}: {result.error}")
@@ -124,7 +132,8 @@ class Runner:
                 # Fetch results are cached across groups: work on a per-group copy.
                 job = dataclasses.replace(shared, extra={k: v for k, v in shared.extra.items() if k != "duplicates"},
                                           also_on=[])
-                self.state.observe(job, self.now)
+                job.extra["target"] = self.locations.target_label(job.locations)
+                self.state.observe(job, self.now, job.extra["target"])
                 if self.bootstrap:
                     self.state.mark_baseline(job)
                     continue
@@ -179,9 +188,9 @@ class Runner:
 
     async def _score(self, items: list[tuple[Job, Source, Adapter]], out: GroupOutcome) -> list[tuple[Job, Source]]:
         use_ai = self.llm.available
-        require_kw = self.config.filters.require_keyword_match
-        if require_kw is None:
-            require_kw = not use_ai
+        default_kw = self.config.filters.require_keyword_match
+        if default_kw is None:
+            default_kw = not use_ai
 
         kept: list[tuple[Job, Source]] = []
         pending: list[tuple[Job, Source]] = []
@@ -198,6 +207,7 @@ class Runner:
             job.experience = extract_experience(job.description)[2]
             fam = family_by_keywords(job, self.config, source)
             job.family = fam
+            require_kw = default_kw if source.require_keyword_match is None else source.require_keyword_match
             if require_kw and not fam:
                 out.reject("no_keyword")
                 continue
@@ -246,12 +256,17 @@ class Runner:
         return not (source.role_families and job.family and job.family not in source.role_families)
 
     def _dedupe(self, items: list[tuple[Job, Source]], group: str, out: GroupOutcome) -> list[Job]:
-        by_fp: dict[str, Job] = {}
+        """Drop duplicates: within this run (fuzzy fingerprint or same URL), already sent in this group,
+        and, in scheduled groups, already sent in another group from another source."""
+        polling = bool(self.config.groups[group].interval_minutes) if group in self.config.groups else False
+        seen_here: dict[str, Job] = {}
         result: list[Job] = []
-        for job, source in items:
-            fp = job.fingerprint
-            if fp in by_fp:
-                first = by_fp[fp]
+        # Stronger candidates first, so the copy that is kept is the best-scored one.
+        for job, source in sorted(items, key=lambda it: -(it[0].score or 0)):
+            target = job.extra.get("target") or ""
+            tokens = [f"fp:{job.fingerprint}|{target}"] + ([f"url:{job.canonical_url}"] if job.canonical_url else [])
+            first = next((seen_here[t] for t in tokens if t in seen_here), None)
+            if first is not None:
                 if source.name not in first.also_on and normalize_text(source.name) != normalize_text(first.company):
                     first.also_on.append(source.name)
                 dups = first.extra.setdefault("duplicates", [])
@@ -259,11 +274,19 @@ class Runner:
                     dups.append(job)
                 out.reject("duplicate")
                 continue
-            if self.state.fingerprint_notified(fp, group, exclude_key=job.key):
+            previous = self.state.notified_duplicates(job, job.extra.get("target"))
+            if any(group in groups for groups in previous.values()):
                 out.reject("duplicate_previous")
+                continue
+            if previous and not polling:
+                for key in previous:
+                    self.state.add_also_on(key, source.name)
+                out.also_elsewhere += 1
+                out.reject("duplicate_other_group")
                 continue
             if group != "favorites" and "favorites" in self.state.notified_groups(job):
                 job.already_alerted = True
-            by_fp[fp] = job
+            for t in tokens:
+                seen_here[t] = job
             result.append(job)
         return result

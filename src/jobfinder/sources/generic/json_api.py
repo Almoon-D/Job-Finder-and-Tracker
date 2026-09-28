@@ -21,7 +21,7 @@ Everything site-specific lives in the private config, e.g.::
         description: "job.description"
 
 Placeholders available in url/body/params/headers: {page}, {offset}, {limit},
-{query}, {location}, {country} (ISO2), {country_name}.
+{query}, {query_slug} ('banca-privada'), {location}, {country} (ISO2), {country_name}.
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ from ...dates import parse_date
 from ...matching.location import country_name
 from ...models import Job
 from ..base import Adapter, AdapterError, register
-from ..util import as_list, html_to_text
+from ..util import as_list, html_to_text, slug
 
 _PH = re.compile(r"\{(\w+)\}")
 
@@ -70,6 +70,7 @@ class JsonApi(Adapter):
     def _variants(self) -> list[dict[str, Any]]:
         """Combinations of query/location to request."""
         spec = json.dumps({k: self.params.get(k) for k in ("url", "body", "params", "headers")})
+        spec = spec.replace("{query_slug}", "{query}")
         queries = self.search_terms() if "{query}" in spec else []
         base: list[dict[str, Any]] = [{"query": q} for q in queries] or [{"query": ""}]
         uses_loc = any(p in spec for p in ("{location}", "{country}", "{country_name}"))
@@ -144,6 +145,7 @@ class JsonApi(Adapter):
             for page in range(pages):
                 variables = {
                     **var,
+                    "query_slug": slug(var.get("query", "")),
                     "limit": limit,
                     "page": start + page,
                     "offset": start + page * limit,

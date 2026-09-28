@@ -5,13 +5,16 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from ..config.schema import Config, Source
 from ..matching.location import LocationMatcher
 from ..models import Job
 from ..state import State
 from .http import Http
+
+if TYPE_CHECKING:
+    from ..matching.llm import LLMMatcher
 
 REGISTRY: dict[str, type[Adapter]] = {}
 
@@ -30,10 +33,18 @@ class FetchContext:
     now: datetime
     locations: LocationMatcher
     max_age_days: float = 3.0
+    llm: LLMMatcher | None = None
 
 
 class AdapterError(Exception):
     pass
+
+
+class SkipSource(Exception):  # noqa: N818 - a signal, not an error
+    """The source cannot run now for an expected reason (e.g. its optional credentials are not set).
+
+    The message must only name environment variables, never config values: it is logged in CI.
+    """
 
 
 class Adapter(ABC):
@@ -77,6 +88,11 @@ class Adapter(ABC):
             **kwargs,
         )
 
+    @property
+    def full_listing(self) -> bool:
+        """Whether to fetch the whole listing, or only run the configured queries."""
+        return not (self.source.only_queries and self.source.queries)
+
     def search_terms(self) -> list[str]:
         """Queries run with the location filter (source.queries)."""
         return list(self.source.queries)
@@ -84,7 +100,7 @@ class Adapter(ABC):
     def coverage_terms(self) -> list[str]:
         """Global keyword searches (no location filter) for 'coverage' roles."""
         cov = self.ctx.config.coverage
-        if not (self.supports_search and self.source.use_coverage_search and cov.enabled):
+        if not (self.supports_search and self.source.use_coverage_search and cov.enabled) or not self.full_listing:
             return []
         return list(cov.search_terms)
 

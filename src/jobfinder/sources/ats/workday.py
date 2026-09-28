@@ -120,10 +120,8 @@ class Workday(Adapter):
         first = await self._page(0, "", {})
         facets = self.location_facets(first.get("facets") or [])
         jobs: list[Job] = []
-        if facets is None:
-            jobs += await self._collect("", {}, self.source.max_pages)
-        elif facets:
-            jobs += await self._collect("", facets, self.source.max_pages)
+        if self.full_listing and facets != {}:  # {} = none of your locations exists on this site
+            jobs += await self._collect("", facets or {}, self.source.max_pages)
         for q in self.search_terms():
             jobs += await self._collect(q, facets or {}, 3)
         for q in self.coverage_terms():

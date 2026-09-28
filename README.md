@@ -18,7 +18,7 @@ looking for.
 - **Four alert types**, each with its own schedule, set in your private config:
   - **Favourite companies**: polled every ~10 minutes, instant high-priority alert.
   - **Company career sites**: e.g. 09:00 and 20:30, offers posted in the last 3 days.
-  - **Job boards** (LinkedIn…): digest every N days.
+  - **Job boards**: digest every N days, grouped by role family and location.
   - **Recruiters / headhunters**: digest every N days.
 - **Auto-detected ATS adapters**: paste a careers URL and the adapter is chosen for you.
   Supported: Workday, Oracle HCM (Recruiting Cloud), Eightfold, SAP SuccessFactors (legacy
@@ -30,14 +30,21 @@ looking for.
   - `jsonld_sitemap` / `jsonld_pages` for schema.org `JobPosting`
   - `rss`
   - `page_monitor` for small firms without an ATS
-- **LinkedIn public search** without login: by keywords, company id or company name.
+- **Job boards**: LinkedIn public search (keywords, company id or name), eFinancialCareers,
+  jobup.ch / jobs.ch, InfoJobs and Adzuna (official APIs, optional keys), plus recipes for
+  others (e.g. OCC, Computrabajo).
+- **Job-alert e-mails** read over IMAP, read-only: LinkedIn, Indeed, InfoJobs,
+  eFinancialCareers, jobup/jobs.ch and Michael Page are parsed directly (tracking links become
+  canonical job URLs); other senders can be read by the AI.
+- **Cross-source de-duplication**: the same offer from a company site, a board and an e-mail is
+  sent once (fuzzy company + title, canonical URL), with "also on …".
 - **Locations**: any number of countries and cities, with multilingual aliases from GeoNames
   (München/Munich, Lisboa/Lisbon, Wien/Vienna…). **Coverage** matching keeps roles based
   elsewhere that mention your market ("DACH coverage, based in London").
-- **Optional free AI matcher**: any OpenAI-compatible API, such as Gemini Flash-Lite, Groq,
-  NVIDIA NIM or OpenRouter. It scores fit, estimates the years of experience required and
-  explains why. Cheap keyword filters run first; without an API key everything still works
-  on keywords only.
+- **Optional free AI matcher**: any OpenAI-compatible API, such as Gemini Flash, NVIDIA NIM,
+  Groq or OpenRouter, tried in order (a spent quota moves on to the next one). It scores fit,
+  estimates the years of experience required and explains why. Cheap keyword filters run
+  first; without an API key everything still works on keywords only.
 - **Idempotent scheduling**: a run can be triggered by GitHub's cron, by an external
   scheduler such as cron-job.org, or manually, and a slot is never notified twice. This
   matters because GitHub's cron can be hours late.
@@ -73,8 +80,11 @@ See [docs/PRIVACY.md](docs/PRIVACY.md) for the full privacy model.
 4. In your fork: add the variable `DATA_REPO` (`you/job-finder-data`) and the secret
    `DATA_REPO_TOKEN`, plus the secrets of the channels you want (`TELEGRAM_BOT_TOKEN`,
    `TELEGRAM_CHAT_ID`, `SMTP_*`, `EMAIL_TO`, `DISCORD_WEBHOOK_URL`, `NTFY_TOPIC`…) and,
-   optionally, `GEMINI_API_KEY` / `GROQ_API_KEY`.
-5. Run **Actions → jobfinder → Run workflow** with `mode: validate`, then `test-notify`.
+   optionally, AI keys (`GEMINI_API_KEY`, `NVIDIA_API_KEY`, `GROQ_API_KEY`), `IMAP_*` for
+   alert e-mails and `INFOJOBS_*` / `ADZUNA_*`. The workflows pass secrets one by one: a new
+   secret name must also be added to their `env:` block.
+5. Run **Actions → jobfinder → Run workflow** with `mode: validate`, then `test-notify` and
+   `test-ai`.
 6. Optional but recommended: trigger the workflows from [cron-job.org](https://cron-job.org)
    for punctual alerts (see the setup guide).
 
@@ -85,6 +95,7 @@ uv sync
 uv run jobfinder validate-config --config my-config.yaml
 uv run jobfinder detect https://acme.wd3.myworkdayjobs.com/External
 uv run jobfinder test-source "Example Bank" --config my-config.yaml --details
+uv run jobfinder test-ai --config my-config.yaml                         # checks every AI provider
 uv run jobfinder dry-run --config my-config.yaml --data-dir /tmp/jf -v   # prints matches locally
 uv run jobfinder run --data-dir data                                     # what the workflow does
 ```

@@ -1,0 +1,40 @@
+{
+ "data": [
+  {
+   "id": "efcA1",
+   "title": "Private Banker - Iberian Clients",
+   "detailsPageUrl": "/jobs-Switzerland-Geneva-Private_Banker.id111111",
+   "jobLocation": {
+    "displayName": "Geneva, Switzerland"
+   },
+   "postedDate": "2026-09-26T08:00:00.000Z",
+   "companyName": "Acme Private Bank",
+   "description": "<p>Advise <b>UHNW</b> clients from Spain.</p>"
+  },
+  {
+   "id": "efcA2",
+   "title": "Compliance Officer",
+   "detailsPageUrl": "/jobs-Switzerland-Zurich-Compliance.id111112",
+   "jobLocation": {
+    "displayName": "Zurich, Switzerland"
+   },
+   "postedDate": "2026-09-25T08:00:00.000Z",
+   "companyName": "Globex Wealth",
+   "description": "KYC."
+  },
+  {
+   "id": "efcA3",
+   "title": "Relationship Manager",
+   "detailsPageUrl": "/jobs-Switzerland-Geneva-RM.id111113",
+   "jobLocation": {
+    "displayName": "Geneva, Switzerland"
+   },
+   "postedDate": "2026-09-10T08:00:00.000Z",
+   "companyName": "Initech Banque",
+   "description": "Old one."
+  }
+ ],
+ "meta": {
+  "totalResults": 3
+ }
+}

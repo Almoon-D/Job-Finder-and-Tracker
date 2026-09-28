@@ -52,9 +52,12 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("test-notify", help="send a test message to every enabled channel")
     _common(p)
 
+    p = sub.add_parser("test-ai", help="send one tiny request to every AI provider that has a key")
+    _common(p)
+
     p = sub.add_parser("test-source", help="fetch one source (by name, id or URL) and print what it finds")
     _common(p)
-    p.add_argument("source", help="source name/id from the config, or a careers URL")
+    p.add_argument("source", help="source name, id or number (#7) from the config, or a careers URL")
     p.add_argument("--type", help="adapter type when testing a URL that cannot be auto-detected")
     p.add_argument("--no-location-filter", action="store_true")
     p.add_argument("--details", action="store_true", help="also fetch descriptions for the first jobs")
@@ -94,6 +97,10 @@ def main(argv: list[str] | None = None) -> int:
             from .app import test_notify
 
             return asyncio.run(test_notify(args.config, data_dir))
+        if args.cmd == "test-ai":
+            from .app import test_ai
+
+            return asyncio.run(test_ai(args.config, data_dir))
         if args.cmd == "test-source":
             from .tools import test_source
 

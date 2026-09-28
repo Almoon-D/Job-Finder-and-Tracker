@@ -6,6 +6,8 @@
       item: "article.job"          # one node per job
       title: "h2"                  # text of this node
       link: "a"                    # href of this node (default: first <a>)
+      # cards without a link: id_attr: data-id + url_template: "https://recruiter.example/job/{id}"
+      company_selector: ".company" # optional (default: the source name)
       location: ".job-location"
       date: ".job-date"
       pagination: {start: 1, max_pages: 3}
@@ -15,6 +17,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from selectolax.parser import HTMLParser, Node
@@ -22,7 +25,7 @@ from selectolax.parser import HTMLParser, Node
 from ...dates import parse_date
 from ...models import Job
 from ..base import Adapter, AdapterError, register
-from ..util import absolute, html_to_text
+from ..util import absolute, html_to_text, slug
 from .json_api import render
 
 
@@ -56,17 +59,21 @@ class HtmlList(Adapter):
         jobs = []
         for node in tree.css(p["item"]):
             title = _text(node, p.get("title")) or node.text(separator=" ", strip=True)[:200]
-            link_node = node.css_first(p.get("link") or "a") if p.get("link") != "self" else node
-            href = link_node.attributes.get("href") if link_node else None
+            native = (node.attributes.get(p["id_attr"]) or "").strip() if p.get("id_attr") else ""
+            if p.get("url_template") and native:
+                href = p["url_template"].replace("{id}", native)
+            else:
+                link_node = node.css_first(p.get("link") or "a") if p.get("link") != "self" else node
+                href = link_node.attributes.get("href") if link_node else None
             if not title or not href:
                 continue
             url = absolute(page_url, href)
             posted, precision = parse_date(_text(node, p.get("date")), self.ctx.now)
             loc = _text(node, p.get("location"))
-            native = node.attributes.get(p["id_attr"]) if p.get("id_attr") else None
             jobs.append(self.job(native or url, title, url, locations=[loc] if loc else [],
                                  posted_at=posted, posted_precision=precision,
-                                 description=_text(node, p.get("summary"))))
+                                 description=_text(node, p.get("summary")),
+                                 company=_text(node, p.get("company_selector")) or None))
         return jobs
 
     async def fetch(self) -> list[Job]:
@@ -76,12 +83,12 @@ class HtmlList(Adapter):
         pag = p.get("pagination") or {}
         start = int(pag.get("start", 1))
         max_pages = int(pag.get("max_pages", 1 if "{page}" not in p["url"] else 3))
-        queries = self.search_terms() if "{query}" in p["url"] else [""]
+        queries = self.search_terms() if re.search(r"\{query(_slug)?\}", p["url"]) else [""]
         out: dict[str, Job] = {}
         for q in queries:
             for page in range(max_pages):
                 url = render(p["url"], {"page": start + page, "offset": page * int(pag.get("limit", 10)),
-                                        "query": q})
+                                        "query": q, "query_slug": slug(q)})
                 html = await fetch_page(self, url, p.get("fetch"))
                 found = self._parse(html, url)
                 new = [j for j in found if j.key not in out]

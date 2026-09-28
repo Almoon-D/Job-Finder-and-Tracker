@@ -33,6 +33,7 @@ class RoleFamily(_Model):
     """A family of roles you are interested in (e.g. "product management")."""
 
     name: str
+    label: str | None = Field(None, description="Name shown in grouped digests (default: the name).")
     description: str = Field("", description="Free text used by the AI matcher to understand the family.")
     include_any: list[str] = Field(
         default_factory=list, description="Title keywords (any language). Used as rule filter when AI is off."
@@ -61,6 +62,7 @@ class LocationSpec(_Model):
     city: str | None = None
     aliases: list[str] = Field(default_factory=list, description="Extra spellings for the city/country.")
     include_remote: bool = Field(True, description="Also match 'Remote' jobs in this country.")
+    label: str | None = Field(None, description="Name shown in grouped digests (default: city or country name).")
 
     @model_validator(mode="after")
     def _need_something(self) -> LocationSpec:
@@ -98,7 +100,9 @@ class Group(_Model):
     grace_hours: float = Field(3.0, gt=0, description="How late a missed scheduled slot may still run.")
     max_age_days: float = Field(3.0, gt=0, description="Only jobs posted (or first seen) within this window.")
     notify_empty: bool = True
-    format: Literal["per_job", "digest"] = "digest"
+    format: Literal["per_job", "digest", "grouped"] = Field(
+        "digest", description="per_job, digest, or grouped (compact digest by role family and location)."
+    )
     priority: Literal["normal", "high"] = "normal"
     max_items: int = Field(50, ge=1, description="Max jobs listed in one notification (rest go to the feed).")
 
@@ -169,6 +173,12 @@ class Source(BaseModel):
     use_coverage_search: bool = True
     max_pages: int = Field(10, ge=1)
     fetch_details: bool = True
+    require_keyword_match: bool | None = Field(
+        None,
+        description="Require a role-family keyword in the title before the AI (saves quota on noisy sources). "
+        "Default: the global filters.require_keyword_match.",
+    )
+    only_queries: bool = Field(False, description="ATS sources: skip the full listing, run only 'queries'.")
 
     @property
     def key(self) -> str:
@@ -189,6 +199,9 @@ class LLMProvider(_Model):
     api_key_env: str
     json_mode: bool = True
     extra_headers: dict[str, str] = Field(default_factory=dict)
+    extra_body: dict[str, Any] = Field(
+        default_factory=dict, description="Extra request fields, e.g. {reasoning_effort: low}."
+    )
 
 
 class LLMConfig(_Model):

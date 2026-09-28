@@ -178,24 +178,66 @@ async def test_ai_scoring_and_cache(tmp_path, monkeypatch):
     assert ai.call_count == 1
 
 
+BOARDS = """
+  boards: {times: ["11:00"], every_days: 3, format: grouped}
+"""
+BOARD_SOURCES = """
+  - name: Hidden Board Alerts
+    type: email_alerts
+    group: boards
+    unknown: ai
+  - name: Hidden Keyed Board
+    type: infojobs
+    group: boards
+    queries: [secret query words]
+"""
+
+
 @respx.mock
 async def test_ci_logs_are_redacted(tmp_path, monkeypatch, capsys):
+    from jobfinder.app import test_ai as check_ai
+    from jobfinder.sources import email_alerts
+
+    from .test_email_alerts import EMAILS, FakeIMAP
+
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("FAKE_AI_KEY", "k")
+    monkeypatch.setenv("IMAP_USER", "private.inbox@example.test")
+    monkeypatch.setenv("IMAP_PASSWORD", "pw")
+    monkeypatch.delenv("INFOJOBS_CLIENT_ID", raising=False)
+    monkeypatch.setattr(email_alerts.imaplib, "IMAP4_SSL", FakeIMAP)
+    FakeIMAP.validity, FakeIMAP.commands = b"1", []
+    FakeIMAP.messages = {1: (EMAILS / "linkedin.eml").read_bytes(), 2: (EMAILS / "unknown.eml").read_bytes()}
     respx.post(url__startswith="https://api.telegram.org/").mock(return_value=httpx.Response(200, json={"ok": True}))
-    write_config(tmp_path)
+    answer = {"results": [{"id": "0", "score": 90, "family": "product", "reason": "Motivo privado"}]}
+    respx.post("https://ai.example.test/v1/chat/completions").mock(return_value=httpx.Response(
+        200, json={"choices": [{"message": {"content": json.dumps(answer)}}]}))
+    llm = """llm:
+  enabled: true
+  providers: [{name: fake, base_url: "https://ai.example.test/v1", model: m, api_key_env: FAKE_AI_KEY}]
+"""
+    write_config(tmp_path, llm=llm)
+    cfg = (tmp_path / "config.yaml").read_text()
+    cfg = cfg.replace("groups:\n", "groups:\n" + BOARDS.strip("\n") + "\n")
+    cfg = cfg.replace("sources:\n", "sources:" + BOARD_SOURCES)
+    (tmp_path / "config.yaml").write_text(cfg)
     from jobfinder import log
 
     log.set_verbose(True)  # even with --verbose, CI must stay quiet
     try:
-        await run(None, tmp_path, groups=["company_sites"], now=NOW, dry_run=True)
-        await run(None, tmp_path, groups=["company_sites"], now=NOW)
+        await run(None, tmp_path, groups=["company_sites", "boards"], now=NOW, dry_run=True)
+        await run(None, tmp_path, groups=["company_sites", "boards"], now=NOW + timedelta(hours=2), force=True)
+        await check_ai(None, tmp_path)
     finally:
         log.set_verbose(False)
     out = capsys.readouterr()
     logs = out.out + out.err
-    for secret in ("Secret Corp", "Product Manager", "Data Analyst", "Berlin", "jobs.example.test", "company_sites"):
+    for secret in ("Secret Corp", "Product Manager", "Data Analyst", "Berlin", "jobs.example.test", "company_sites",
+                   "boards", "Hidden", "secret query", "Senior Private Banker", "Acme Private Bank", "linkedin.com",
+                   "private.inbox", "Private banker: 2 new jobs", "board.example.test", "Hooli", "Motivo privado"):
         assert secret not in logs, secret
-    assert "source #1" in logs
+    assert "source #1" in logs and "skipped (no credentials: set INFOJOBS_CLIENT_ID" in logs
+    assert "email: 2 new messages" in logs
 
 
 async def test_bootstrap_marks_seen_without_notifying(tmp_path):

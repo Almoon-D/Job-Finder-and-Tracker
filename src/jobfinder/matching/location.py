@@ -12,6 +12,7 @@ import re
 from dataclasses import dataclass, field
 from functools import lru_cache
 
+from .. import models
 from ..config.schema import Coverage, LocationSpec
 from ..models import normalize_text
 
@@ -164,7 +165,17 @@ class _Target:
     country: str | None
     city_names: frozenset[str] = field(default_factory=frozenset)
     include_remote: bool = True
-    label: str | None = None
+    label: str | None = None  # the configured city (None for a whole country)
+    display: str = ""
+
+    def matches(self, loc: str, norm: str, mentioned: set[str]) -> bool:
+        if self.city_names:
+            return any(_contains(norm, n) for n in self.city_names) and (not mentioned or self.country in mentioned)
+        if self.country is None:
+            return False
+        if self.country in mentioned:
+            return self.include_remote or not _REMOTE.search(loc)
+        return not mentioned and any(_contains(norm, n) for n in major_cities(self.country))
 
 
 class LocationMatcher:
@@ -177,7 +188,11 @@ class LocationMatcher:
                 names = city_aliases(spec.city, iso2) | {normalize_text(a) for a in spec.aliases}
             elif spec.aliases and iso2:
                 country_aliases()[iso2].update(normalize_text(a) for a in spec.aliases)
-            self.targets.append(_Target(iso2, names, spec.include_remote, spec.city))
+            display = spec.label or spec.city or (country_name(iso2) if iso2 else spec.country or "")
+            self.targets.append(_Target(iso2, names, spec.include_remote, spec.city, display))
+            models.PLACE_WORDS.update(names)
+        models.PLACE_WORDS.update(n for names in country_aliases().values() for n in names)
+        self._target_cache: dict[str, _Target | None] = {}
         self.coverage = coverage if coverage and coverage.enabled else None
         self._cov_terms = [normalize_text(t) for t in (self.coverage.text_any if self.coverage else [])]
         self._cov_cities = [normalize_text(c) for c in (self.coverage.only_cities if self.coverage else [])]
@@ -203,25 +218,26 @@ class LocationMatcher:
     def cities(self) -> list[str]:
         return [t.label for t in self.targets if t.label]
 
-    def match_location(self, loc: str) -> bool:
+    def target_for(self, loc: str) -> _Target | None:
+        """First configured target (in config order) that a free-text location matches."""
+        if loc in self._target_cache:
+            return self._target_cache[loc]
         norm = normalize_text(loc)
-        if not norm:
-            return False
-        mentioned = countries_in(loc)
-        for t in self.targets:
-            if t.city_names:
-                if any(_contains(norm, n) for n in t.city_names) and (not mentioned or t.country in mentioned):
-                    return True
-                continue
-            if t.country is None:
-                continue
-            if t.country in mentioned:
-                if _REMOTE.search(loc) and not t.include_remote:
-                    continue
-                return True
-            if not mentioned and any(_contains(norm, n) for n in major_cities(t.country)):
-                return True
-        return False
+        mentioned = countries_in(loc) if norm else set()
+        found = next((t for t in self.targets if t.matches(loc, norm, mentioned)), None) if norm else None
+        self._target_cache[loc] = found
+        return found
+
+    def match_location(self, loc: str) -> bool:
+        return self.target_for(loc) is not None
+
+    def target_label(self, locations: list[str]) -> str | None:
+        """Display name of the configured place a job belongs to ('Geneva', 'España'...), if any."""
+        for loc in locations:
+            t = self.target_for(loc)
+            if t is not None:
+                return t.display
+        return None
 
     def match_coverage(self, locations: list[str], text: str) -> bool:
         if not self._cov_terms:

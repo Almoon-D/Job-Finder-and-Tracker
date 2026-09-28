@@ -13,6 +13,7 @@ from pathlib import Path
 from xml.sax.saxutils import escape
 
 from .config.schema import Config
+from .i18n import t
 from .state import State, iso, parse_iso
 
 FEED_DAYS = 30
@@ -36,8 +37,14 @@ def _items(config: Config, state: State, now: datetime) -> list[dict]:
             "groups": groups,
             "score": e.get("score"),
             "reason": (e.get("verdict") or {}).get("reason"),
+            "also_on": e.get("also_on") or [],
+            "lang": config.language,
         })
     return items
+
+
+def _also(item: dict) -> str:
+    return f"{t(item['lang'], 'also_on')}: {', '.join(item['also_on'])}" if item["also_on"] else ""
 
 
 def write_feeds(config: Config, state: State, data_dir: Path, now: datetime, last_runs: dict) -> None:
@@ -55,11 +62,11 @@ def write_feeds(config: Config, state: State, data_dir: Path, now: datetime, las
                 "id": it["id"],
                 "url": it["url"],
                 "title": it["title"],
-                "content_text": " · ".join(x for x in (it["location"], it["reason"]) if x) or it["title"],
+                "content_text": " · ".join(x for x in (it["location"], it["reason"], _also(it)) if x) or it["title"],
                 "date_published": it["posted_at"] or it["first_seen"],
                 "date_modified": it["notified_at"],
                 "tags": it["groups"],
-                "_jobfinder": {k: it[k] for k in ("company", "job_title", "location", "score", "groups")},
+                "_jobfinder": {k: it[k] for k in ("company", "job_title", "location", "score", "groups", "also_on")},
             }
             for it in items
         ],
@@ -69,7 +76,7 @@ def write_feeds(config: Config, state: State, data_dir: Path, now: datetime, las
     rss_items = []
     for it in items:
         date = parse_iso(it["notified_at"]) or now
-        desc = " · ".join(x for x in (it["location"], it["reason"]) if x)
+        desc = " · ".join(x for x in (it["location"], it["reason"], _also(it)) if x)
         rss_items.append(
             "<item>"
             f"<title>{escape(it['title'])}</title>"

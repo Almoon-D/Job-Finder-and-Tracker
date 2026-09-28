@@ -32,6 +32,9 @@ class Notification:
     problems: list[str] = field(default_factory=list)
     max_items: int = 50
     test: bool = False
+    family_labels: dict[str, str] = field(default_factory=dict)  # family name -> display name, in config order
+    place_order: list[str] = field(default_factory=list)  # location display names, in config order
+    also_elsewhere: int = 0  # matches not repeated because another group already sent them
 
     @property
     def empty(self) -> bool:
@@ -89,6 +92,44 @@ class Notification:
         if flags:
             lines.append(" · ".join(flags))
         return lines
+
+    def sections(self) -> list[tuple[str, list[Job]]]:
+        """Shown jobs grouped by role family and place: [("Private banking · Geneva (3)", jobs)]."""
+        other = t(self.lang, "other")
+        families = list(self.family_labels)
+        buckets: dict[tuple[str, str], list[Job]] = {}
+        for job in self.shown:
+            fam = job.family if job.family in self.family_labels else ""
+            place = job.extra.get("target") or (t(self.lang, "coverage_place") if job.coverage_match else "")
+            buckets.setdefault((fam, place), []).append(job)
+
+        def order(key: tuple[str, str]) -> tuple[int, int, str]:
+            fam, place = key
+            fi = families.index(fam) if fam in families else len(families)
+            pi = self.place_order.index(place) if place in self.place_order else len(self.place_order) + (not place)
+            return fi, pi, place
+
+        out = []
+        for key in sorted(buckets, key=order):
+            fam, place = key
+            heading = " · ".join([self.family_labels.get(fam) or other] + ([place] if place else []))
+            out.append((f"{heading} ({len(buckets[key])})", buckets[key]))
+        return out
+
+    def compact_meta(self, job: Job) -> str:
+        """One-line secondary info for grouped digests: company · place · fit · date · flags."""
+        bits = [job.company] if job.company else []
+        if job.location_text:
+            bits.append(f"📍 {job.location_text[:60]}")
+        if job.score is not None:
+            bits.append(f"⭐ {job.score}")
+        ref = job.posted_at or job.first_seen or self.now
+        bits.append(f"🕒 {'~' if job.posted_precision == 'relative' else ''}{ref.astimezone(self.tz):%d/%m}")
+        if job.already_alerted:
+            bits.append(f"⚡ {t(self.lang, 'already')}")
+        if job.also_on:
+            bits.append(f"{t(self.lang, 'also_on')}: {', '.join(job.also_on)}")
+        return " · ".join(bits)
 
     def job_heading(self, job: Job) -> str:
         if job.kind == "page_change":

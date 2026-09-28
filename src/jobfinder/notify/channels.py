@@ -39,6 +39,8 @@ def chunk(parts: list[str], limit: int, sep: str = "\n\n") -> list[str]:
 
 def footer_lines(n: Notification) -> list[str]:
     lines = [n.sources_line]
+    if n.also_elsewhere:
+        lines.insert(0, t(n.lang, "elsewhere", n=n.also_elsewhere))
     if n.hidden_count:
         lines.insert(0, t(n.lang, "more", n=n.hidden_count))
     if n.problems:
@@ -53,6 +55,16 @@ class Telegram(Channel):
 
     def enabled(self) -> bool:
         return self.config.notify.telegram.enabled
+
+    def _grouped_parts(self, n: Notification) -> list[str]:
+        """One part per job line; a section heading travels with its first line (never orphaned)."""
+        e = html.escape
+        parts = []
+        for heading, jobs in n.sections():
+            for i, job in enumerate(jobs):
+                line = f'• <a href="{e(job.url, quote=True)}">{e(job.title[:150])}</a> — {e(n.compact_meta(job))}'
+                parts.append(f"\n<b>{e(heading)}</b>\n{line}" if i == 0 else line)
+        return parts
 
     def _job_html(self, n: Notification, job) -> str:
         e = html.escape
@@ -88,19 +100,52 @@ class Telegram(Channel):
             if n.hidden_count or n.problems:
                 await self._send(token, chat, footer, True)
             return
-        parts = [header] + [self._job_html(n, j) for j in n.shown] + [footer]
-        for i, text in enumerate(chunk(parts, self.LIMIT)):
+        if n.format == "grouped" and not n.empty:
+            messages = chunk([header, *self._grouped_parts(n), f"\n{footer}"], self.LIMIT, sep="\n")
+        else:
+            messages = chunk([header] + [self._job_html(n, j) for j in n.shown] + [footer], self.LIMIT)
+        for i, text in enumerate(messages):
             if i:
                 await asyncio.sleep(1.1)
             await self._send(token, chat, text, silent)
 
 
 # ---------------------------------------------------------------------- Discord
+def pack_embeds(embeds: list[dict], max_embeds: int = 10, max_chars: int = 6000) -> list[list[dict]]:
+    """Split embeds into messages within Discord's limits (10 embeds and 6000 characters per message)."""
+
+    def size(e: dict) -> int:
+        return len(e.get("title", "")) + len(e.get("description", "")) + len((e.get("footer") or {}).get("text", ""))
+
+    out: list[list[dict]] = []
+    cur: list[dict] = []
+    total = 0
+    for e in embeds:
+        if cur and (len(cur) >= max_embeds or total + size(e) > max_chars):
+            out.append(cur)
+            cur, total = [], 0
+        cur.append(e)
+        total += size(e)
+    if cur:
+        out.append(cur)
+    return out
+
+
 class Discord(Channel):
     name = "discord"
+    DESCRIPTION = 4096
 
     def enabled(self) -> bool:
         return self.config.notify.discord.enabled
+
+    def _grouped_embeds(self, n: Notification, color: int) -> list[dict]:
+        embeds = []
+        for heading, jobs in n.sections():
+            lines = [f"• [{j.title[:150].replace(']', ')')}]({j.url}) — {n.compact_meta(j)}"[:1000] for j in jobs]
+            # A long section continues in another embed with the same title.
+            for block in chunk(lines, self.DESCRIPTION, sep="\n"):
+                embeds.append({"title": heading[:256], "description": block, "color": color})
+        return embeds
 
     async def send(self, n: Notification) -> None:
         url = env(self.config.notify.discord.webhook_env)
@@ -110,26 +155,28 @@ class Discord(Channel):
         if n.test:
             await self.http.request("POST", url, json={"content": f"**{n.title}**\n{t(n.lang, 'test_body')}"})
             return
-        embeds = [
-            {
-                "title": n.job_heading(j)[:256],
-                "url": j.url,
-                "description": "\n".join(n.job_meta(j))[:4000],
-                "color": color,
-            }
-            for j in n.shown
-        ]
+        if n.format == "grouped":
+            embeds = self._grouped_embeds(n, color)
+        else:
+            embeds = [
+                {
+                    "title": n.job_heading(j)[:256],
+                    "url": j.url,
+                    "description": "\n".join(n.job_meta(j))[:4000],
+                    "color": color,
+                }
+                for j in n.shown
+            ]
         content = f"**{n.title}**"
-        footer = "\n".join(footer_lines(n))
+        footer = "\n".join(footer_lines(n))[:2048]
         if not embeds:
             await self.http.request("POST", url, json={"content": f"{content}\n{footer}"[:2000]})
             return
-        for i in range(0, len(embeds), 10):
-            payload = {"embeds": embeds[i:i + 10]}
+        embeds[-1]["footer"] = {"text": footer}
+        for i, batch in enumerate(pack_embeds(embeds)):
+            payload: dict = {"embeds": batch}
             if i == 0:
                 payload["content"] = content[:2000]
-            if i + 10 >= len(embeds):
-                payload["embeds"][-1]["footer"] = {"text": footer[:2000]}
             await self.http.request("POST", url, json=payload)
             await asyncio.sleep(0.6)
 
@@ -149,8 +196,14 @@ class Email(Channel):
 
     def render(self, n: Notification) -> tuple[str, str]:
         text_parts = [n.title, ""]
-        for j in n.shown:
-            text_parts += [n.job_heading(j), *n.job_meta(j), j.url, ""]
+        if n.format == "grouped":
+            for heading, jobs in n.sections():
+                text_parts += [f"== {heading} ==", ""]
+                for j in jobs:
+                    text_parts += [n.job_heading(j), *n.job_meta(j), j.url, ""]
+        else:
+            for j in n.shown:
+                text_parts += [n.job_heading(j), *n.job_meta(j), j.url, ""]
         text_parts += footer_lines(n)
         if n.test:
             text_parts = [n.title, t(n.lang, "test_body")]
@@ -203,7 +256,8 @@ class Ntfy(Channel):
     async def _post(self, server: str, topic: str, title: str, body: str, priority: int, click: str | None,
                     token: str) -> None:
         """Publish via ntfy's JSON API (supports UTF-8 titles and Markdown)."""
-        payload = {"topic": topic, "title": title, "message": body[:3900], "priority": priority,
+        body = body.encode()[:3900].decode(errors="ignore")  # ntfy's limit is 4096 bytes, not characters
+        payload = {"topic": topic, "title": title, "message": body, "priority": priority,
                    "markdown": True, "tags": ["briefcase"]}
         if click:
             payload["click"] = click
@@ -226,7 +280,12 @@ class Ntfy(Channel):
             if n.hidden_count or n.problems:
                 await self._post(server, topic, n.title, "\n".join(footer_lines(n)), 2, None, token)
             return
-        lines = [f"- [{n.job_heading(j)}]({j.url}) · {n.when(j)}" for j in n.shown]
+        if n.format == "grouped":
+            lines = []
+            for heading, jobs in n.sections():
+                lines += [f"**{heading}**"] + [f"- [{j.title}]({j.url}) · {n.compact_meta(j)}" for j in jobs]
+        else:
+            lines = [f"- [{n.job_heading(j)}]({j.url}) · {n.when(j)}" for j in n.shown]
         body = "\n".join(lines + [""] + footer_lines(n))
         await self._post(server, topic, n.title, body, 2 if n.empty else prio,
                          n.jobs[0].url if len(n.jobs) == 1 else None, token)
@@ -251,8 +310,12 @@ class AppriseChannel(Channel):
         for u in urls:
             app.add(u)
         body_lines = []
-        for j in n.shown:
-            body_lines += [f"**[{n.job_heading(j)}]({j.url})**", *n.job_meta(j), ""]
+        if n.format == "grouped":
+            for heading, jobs in n.sections():
+                body_lines += [f"### {heading}"] + [f"- [{j.title}]({j.url}) · {n.compact_meta(j)}" for j in jobs] + [""]
+        else:
+            for j in n.shown:
+                body_lines += [f"**[{n.job_heading(j)}]({j.url})**", *n.job_meta(j), ""]
         body_lines += footer_lines(n)
         if n.test:
             body_lines = [t(n.lang, "test_body")]

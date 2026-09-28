@@ -17,7 +17,19 @@ parameters.
   use_coverage_search: true     # run coverage.search_terms globally on this source
   fetch_details: true           # download full descriptions for candidates
   max_pages: 10
+  require_keyword_match: true   # only titles with a role-family keyword reach the AI (saves quota)
+  only_queries: true            # ATS sources: run only `queries`, not the full listing
 ```
+
+`require_keyword_match` is useful on noisy, high-volume sources (whole-country board listings,
+generic search engines). `only_queries` suits large employers where only a few roles interest you:
+with `queries: [investor relations]`, `only_queries: true`, `role_families: [ir]` and
+`require_keyword_match: true` only those searches run and only matching titles are kept. It is
+supported by `workday`, `oracle_hcm`, `successfactors` (RMK) and `eightfold`.
+
+Sources whose optional credentials are missing (`infojobs`, `adzuna`, `email_alerts`) are
+**skipped**: the log says `source #n: skipped (no credentials: set …)`, they do not count as
+failures and trigger no health alert. They start working as soon as the secrets exist.
 
 Use `jobfinder detect <url>` to see which adapter handles a URL, and
 `jobfinder test-source <name|url>` to see what a source returns.
@@ -42,10 +54,20 @@ Use `jobfinder detect <url>` to see which adapter handles a URL, and
 
 ## Job boards
 
+| Type | Site | Needs | Notes |
+|---|---|---|---|
+| `linkedin` | LinkedIn public search | – | Rate-limited; keep queries few (use `OR`). |
+| `efinancialcareers` | eFinancialCareers | – | Whole country, newest first, until the age window ends. |
+| `jobcloud` | jobup.ch, jobs.ch | – | Public search API; searches are spaced out (CloudFront). |
+| `infojobs` | InfoJobs (Spain) | `INFOJOBS_CLIENT_ID`, `INFOJOBS_CLIENT_SECRET` | Official API. |
+| `adzuna` | Adzuna (ES, CH, MX, GB, FR…) | `ADZUNA_APP_ID`, `ADZUNA_APP_KEY` | Official API, free keys with a daily cap. |
+| `email_alerts` | Alert e-mails over IMAP | `IMAP_USER`, `IMAP_PASSWORD` (`IMAP_HOST`) | LinkedIn, Indeed, InfoJobs, eFinancialCareers, jobup/jobs.ch, Michael Page; others with AI. |
+
 ### `linkedin`
 
 Public guest search, with no login. LinkedIn rate-limits datacenter IPs, so keep the number
-of queries low and never use it in the `favorites` group.
+of queries low and never use it in the `favorites` group. Each query runs once per location,
+so combine synonyms with `OR`: `'"private banker" OR "wealth manager"'`.
 
 ```yaml
 - name: LinkedIn
@@ -60,6 +82,97 @@ of queries low and never use it in the `favorites` group.
   max_pages: 2                              # 10 jobs per page
 ```
 
+### `efinancialcareers`
+
+Reads the JSON API behind the public search. For each country it takes every job, newest first,
+until the jobs are older than the group's window (the search only sorts by date without a
+keyword), then runs `queries` inside the country and the coverage terms worldwide. Listings
+carry the full description.
+
+```yaml
+- name: eFinancialCareers
+  group: boards
+  type: efinancialcareers
+  countries: [ES, CH]           # default: the countries of your locations
+  max_pages: 4                  # 100 jobs per page
+  require_keyword_match: true
+```
+
+### `jobcloud` (jobup.ch / jobs.ch)
+
+```yaml
+- name: jobup.ch
+  group: boards
+  type: jobcloud
+  site: jobup.ch                # or jobs.ch
+  queries: [private banker, gestionnaire de fortune]
+  locations: [Geneva, Lausanne] # default: your configured Swiss cities
+  max_pages: 2                  # 20 jobs per page, newest first
+```
+
+The API sits behind CloudFront, which blocks bursts and caches the 403 for a while: searches are
+spaced out, a blocked search is skipped and the source only fails if every search is blocked.
+
+### `infojobs` and `adzuna`
+
+```yaml
+- name: InfoJobs
+  group: boards
+  type: infojobs
+  queries: [banca privada, relación con inversores]
+  provinces: [madrid]           # optional; default all of Spain
+- name: Adzuna
+  group: boards
+  type: adzuna
+  queries: [private banker]
+  countries: [ES, CH, MX]       # default: the countries of your locations
+  where: {ES: [Madrid]}         # optional; default your cities (or the whole country)
+```
+
+Credentials: [developer.infojobs.net](https://developer.infojobs.net) (application → client id
+and secret) and [developer.adzuna.com](https://developer.adzuna.com) (app id and key).
+
+### `email_alerts`
+
+Many boards only offer e-mail alerts (Indeed), or let you tune them far better than any search.
+Send those alerts to a dedicated mailbox and read it over IMAP:
+
+```yaml
+- name: Alerts (boards)
+  group: boards
+  type: email_alerts
+  parsers: [linkedin, indeed, infojobs, efinancialcareers, jobup]
+  unknown: ai                    # other senders: extract jobs with the AI (without AI: ignored)
+  exclude_senders: [michaelpage] # handled by another source
+- name: Alerts (recruiters)
+  group: recruiters
+  type: email_alerts
+  parsers: [michaelpage]
+  ai_senders: [hays, robertwalters]   # these unknown senders are always read with the AI
+```
+
+- **Read-only**: the mailbox is opened with `EXAMINE` and messages are fetched with
+  `BODY.PEEK[]`, so nothing is marked read, moved or deleted. The last UID seen is kept in
+  `state/runs.json` (`monitors`), so each e-mail is processed once. Only e-mails of the last
+  `max_age_days + 1` days are considered.
+- **Parsers** turn every tracking link (`…?url=https%3A…`) into the job's canonical URL
+  (`linkedin.com/jobs/view/<id>/`, `indeed.com/viewjob?jk=<id>`, `infojobs.net/…/of-i<id>`,
+  `efinancialcareers.com/…id<n>`, `jobup.ch/…/detail/<uuid>/`, `michaelpage.*/job-detail/…/ref/…`).
+  The link text is the title; the next lines of the same block are the company and the place
+  (a place is only kept if it names a known country or city). Opaque trackers are followed with
+  a GET (at most `resolve_redirects: 20` per run).
+- **Unknown senders** with `unknown: ai`: the AI gets the subject, the text and the numbered list
+  of links, and must answer JSON; jobs whose URL is not one of the e-mail's links are dropped.
+- The e-mail date is used as an approximate posting date (`~26/09`).
+- `senders: {indeed: [alerts@custom.example]}` overrides the sender patterns of a parser.
+
+### Not supported
+
+| Site | Why | Alternative |
+|---|---|---|
+| Indeed | No public API; the only programmatic access (used by python-jobspy) impersonates Indeed's mobile app with its private key, and the web pages are protected against datacenter IPs. | Indeed e-mail alerts (`email_alerts`), Adzuna. |
+| Welcome to the Jungle | Search results are rendered in the browser from a third-party search service; `/jobs?query=` redirects to the home page. | Its e-mail alerts, read with `unknown: ai`. |
+
 ## Declarative recipes (any other site)
 
 These keep all site-specific knowledge in your private config. Placeholders available in
@@ -71,7 +184,8 @@ URLs, bodies, params and headers:
 - `{country}` (ISO2) and `{country_name}`
 
 A string that is exactly one placeholder keeps its type, so `"{limit}"` becomes the number
-`20`.
+`20`. `{query_slug}` is the query as a URL slug (`banca privada` → `banca-privada`), for sites
+whose search URLs look like `/trabajo-de-banca-privada`.
 
 ### `json_api`
 
@@ -109,11 +223,16 @@ A string that is exactly one placeholder keeps its type, so `"{limit}"` becomes 
   link: "a"                 # or "self" if the item itself is the <a>
   location: ".location"
   date: ".date"
+  company_selector: ".company"  # optional: company name (default: the source name)
   pagination: {start: 1, max_pages: 3}
   fetch: http               # or browser (Playwright; installed automatically when used)
   wait_for: "article.job"   # browser mode: wait for this selector
   detail: {description: ".job-description"}
 ```
+
+Cards without a link (the page opens the job with JavaScript) can build the URL from an
+attribute: `id_attr: data-id` and `url_template: "https://recruiter.example.test/job/{id}"`.
+Search pages work with `{query}` or `{query_slug}` in `url` and the source's `queries`.
 
 ### `jsonld_sitemap` / `jsonld_pages`
 
