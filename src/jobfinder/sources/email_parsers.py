@@ -28,6 +28,14 @@ _GENERIC = re.compile(
     re.I,
 )
 
+# Links that must never be followed (following an unsubscribe link would cancel the alert).
+# Words chosen so that they never appear in job titles ("Wealth Manager" must stay followable).
+_ACCOUNT = (r"unsub|opt.?out|darse de baja|dar de baja|suscrip|subscription|d[ée]sabonn|d[ée]sinscri|abmeld|"
+            r"abbestell|preferenc|settings|configuraci[oó]n|param[eè]tres|einstellungen|privacy|privacidad|"
+            r"confidentialit|datenschutz|login|log in|sign.?in|password|contrase[nñ]a|feedback")
+_NEVER_FOLLOW_TEXT = re.compile(_ACCOUNT + r"|(manage|gestionar|g[ée]rer|cancel(ar)?) .*(alert|email|mail)", re.I)
+_NEVER_FOLLOW_URL = re.compile(_ACCOUNT + r"|psettings|/baja", re.I)
+
 
 @dataclass(frozen=True)
 class SiteParser:
@@ -152,9 +160,14 @@ def parse_known(html: str, parser: SiteParser) -> list[ParsedJob]:
 
 
 def opaque_links(html: str, parser: SiteParser) -> list[tuple[str, str]]:
-    """(href, text) of title-like links whose target is hidden behind an opaque redirect."""
+    """(href, text) of title-like links whose target is hidden behind an opaque redirect.
+
+    Account links (unsubscribe, settings, privacy, login...) are never returned: they must not be followed.
+    """
     out = []
     for href, text, _ in links(html):
+        if _NEVER_FOLLOW_TEXT.search(text) or _NEVER_FOLLOW_URL.search(unwrap(href)):
+            continue
         if _is_title(text) and not parser.job_id(unwrap(href)):
             out.append((href, text))
     return out

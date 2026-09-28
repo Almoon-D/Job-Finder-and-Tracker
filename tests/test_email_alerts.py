@@ -216,3 +216,34 @@ async def test_sender_filters(tmp_path, imap):
     jobs = await build_adapter(ctx).fetch()
     assert {j.key.split(":")[1] for j in jobs} == {"linkedin"}
     await ctx.http.aclose()
+
+
+def test_opaque_links_never_include_account_links():
+    from jobfinder.sources.email_parsers import opaque_links
+
+    html = """<a href="https://t.example.test/abc">Senior Private Banker</a>
+    <a href="https://t.example.test/def">Cancelar suscripción</a>
+    <a href="https://t.example.test/x?u=https%3A%2F%2Fwww.linkedin.com%2Fcomm%2Fpsettings%2Fjob-alerts">Job alert settings</a>
+    <a href="https://t.example.test/unsubscribe?id=1">Stop these emails</a>"""
+    assert opaque_links(html, PARSERS["indeed"]) == [("https://t.example.test/abc", "Senior Private Banker")]
+
+
+@respx.mock
+async def test_opaque_tracker_is_followed_to_the_job(tmp_path, imap):
+    raw = (EMAILS / "indeed.eml").read_bytes().replace(b"jk=", b"xx=").replace(b"jk%3D", b"xx%3D")
+    imap.messages = {1: raw}
+    respx.get(url__startswith="https://click.tracker.example.test/").mock(return_value=httpx.Response(
+        302, headers={"Location": "https://es.indeed.com/viewjob?jk=00000000000000aa&from=ja"}))
+    respx.get(url__startswith="https://es.indeed.com/").mock(return_value=httpx.Response(200, text="job"))
+    _, ctx = ctx_for(tmp_path, parsers=["indeed"])
+    jobs = await build_adapter(ctx).fetch()
+    assert [j.url for j in jobs] == ["https://es.indeed.com/viewjob?jk=00000000000000aa"]
+    await ctx.http.aclose()
+
+
+def test_opaque_links_keep_manager_titles():
+    from jobfinder.sources.email_parsers import opaque_links
+
+    html = """<a href="https://t.example.test/a">Wealth Manager</a>
+    <a href="https://t.example.test/b">Manage your job alerts</a>"""
+    assert opaque_links(html, PARSERS["indeed"]) == [("https://t.example.test/a", "Wealth Manager")]

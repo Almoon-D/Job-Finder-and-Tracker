@@ -213,7 +213,7 @@ async def test_notify(config_path: str | None, data_dir: Path) -> int:
 
 
 async def test_ai(config_path: str | None, data_dir: Path) -> int:
-    """Check every AI provider that has a key. Prints provider names (from the example config) and status only."""
+    """Check every AI provider that has a key. Logs only each provider's number, `name` and status."""
     from .matching.llm import LLMMatcher
 
     config = load_or_report(config_path, data_dir, push=False)

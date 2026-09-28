@@ -192,6 +192,7 @@ class LocationMatcher:
             self.targets.append(_Target(iso2, names, spec.include_remote, spec.city, display))
             models.PLACE_WORDS.update(names)
         models.PLACE_WORDS.update(n for names in country_aliases().values() for n in names)
+        self._target_cache: dict[str, _Target | None] = {}
         self.coverage = coverage if coverage and coverage.enabled else None
         self._cov_terms = [normalize_text(t) for t in (self.coverage.text_any if self.coverage else [])]
         self._cov_cities = [normalize_text(c) for c in (self.coverage.only_cities if self.coverage else [])]
@@ -219,11 +220,13 @@ class LocationMatcher:
 
     def target_for(self, loc: str) -> _Target | None:
         """First configured target (in config order) that a free-text location matches."""
+        if loc in self._target_cache:
+            return self._target_cache[loc]
         norm = normalize_text(loc)
-        if not norm:
-            return None
-        mentioned = countries_in(loc)
-        return next((t for t in self.targets if t.matches(loc, norm, mentioned)), None)
+        mentioned = countries_in(loc) if norm else set()
+        found = next((t for t in self.targets if t.matches(loc, norm, mentioned)), None) if norm else None
+        self._target_cache[loc] = found
+        return found
 
     def match_location(self, loc: str) -> bool:
         return self.target_for(loc) is not None

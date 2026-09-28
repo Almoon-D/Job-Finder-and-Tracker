@@ -101,6 +101,7 @@ class Runner:
             return True
         ok, via_coverage = self.locations.matches(job.locations, f"{job.title} {job.description}")
         job.coverage_match = via_coverage
+        job.extra["target"] = self.locations.target_label(job.locations)  # locations may come from enrich()
         return ok
 
     # ----------------------------------------------------------------- run
