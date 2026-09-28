@@ -179,6 +179,11 @@ class Source(BaseModel):
         "Default: the global filters.require_keyword_match.",
     )
     only_queries: bool = Field(False, description="ATS sources: skip the full listing, run only 'queries'.")
+    use_ai: bool = Field(
+        True,
+        description="Send this source's jobs to the AI matcher. False: keyword matching only (e.g. sites whose "
+        "robots.txt opts out of AI input).",
+    )
 
     @property
     def key(self) -> str:

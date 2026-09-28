@@ -12,6 +12,7 @@ index them. This adapter needs no site-specific code::
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from datetime import timedelta
@@ -22,7 +23,8 @@ from selectolax.parser import HTMLParser
 from ...dates import parse_date
 from ...models import Job
 from ..base import Adapter, AdapterError, register
-from ..util import as_list, html_to_text
+from ..http import HttpError
+from ..util import as_list, html_to_text, unwrap_cdata
 
 
 def _walk(obj: Any):
@@ -39,7 +41,8 @@ def job_postings(html: str) -> list[dict[str, Any]]:
     out = []
     for node in HTMLParser(html).css('script[type="application/ld+json"]'):
         try:
-            data = json.loads(node.text() or "")
+            # strict=False: many sites leave raw newlines inside the description string.
+            data = json.loads(node.text() or "", strict=False)
         except ValueError:
             continue
         for obj in _walk(data):
@@ -85,7 +88,7 @@ class JsonLdSitemap(Adapter):
     type_name = "jsonld_sitemap"
 
     async def _sitemap_urls(self, url: str, depth: int = 0) -> list[tuple[str, str | None]]:
-        xml = await self.http.get_text(url)
+        xml = unwrap_cdata(await self.http.get_text(url))
         tree = HTMLParser(xml)
         out: list[tuple[str, str | None]] = []
         if tree.css_first("sitemapindex") and depth < 2:
@@ -118,13 +121,23 @@ class JsonLdSitemap(Adapter):
             elif self.ctx.now - dt <= window:
                 fresh.append((u, dt))
         fresh.sort(key=lambda e: e[1] or self.ctx.now, reverse=True)
+        urls = [u for u, _ in fresh[:max_urls]]
+        # Concurrent, within the per-host limit of the HTTP client; one broken page must not hide the others.
+        pages = await asyncio.gather(*(self.http.get_text(u) for u in urls), return_exceptions=True)
         jobs = []
-        for u, _ in fresh[:max_urls]:
-            html = await self.http.get_text(u)
+        errors: list[BaseException] = []
+        for u, html in zip(urls, pages, strict=True):
+            if isinstance(html, BaseException):
+                if not isinstance(html, HttpError):
+                    raise html
+                errors.append(html)
+                continue
             for p in job_postings(html)[:1]:
                 job = posting_to_job(self, p, u)
                 job.native_id = u  # stable id = page URL
                 jobs.append(job)
+        if errors and len(errors) == len(urls):
+            raise errors[0]
         return jobs
 
 

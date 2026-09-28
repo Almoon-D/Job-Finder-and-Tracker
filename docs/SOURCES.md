@@ -19,6 +19,7 @@ parameters.
   max_pages: 10
   require_keyword_match: true   # only titles with a role-family keyword reach the AI (saves quota)
   only_queries: true            # ATS sources: run only `queries`, not the full listing
+  use_ai: true                  # false: never send this source's jobs to the AI (keyword matching only)
 ```
 
 `require_keyword_match` is useful on noisy, high-volume sources (whole-country board listings,
@@ -26,6 +27,10 @@ generic search engines). `only_queries` suits large employers where only a few r
 with `queries: [investor relations]`, `only_queries: true`, `role_families: [ir]` and
 `require_keyword_match: true` only those searches run and only matching titles are kept. It is
 supported by `workday`, `oracle_hcm`, `successfactors` (RMK) and `eightfold`.
+
+`use_ai: false` keeps a source out of the AI matcher: its jobs pass only if a role-family keyword
+is in the title (restrict `role_families` to unambiguous families to avoid noise). Use it for
+sites whose `robots.txt` opts out of AI use (`Content-Signal: ai-input=no`), or to save quota.
 
 Sources whose optional credentials are missing (`infojobs`, `adzuna`, `email_alerts`) are
 **skipped**: the log says `source #n: skipped (no credentials: set …)`, they do not count as
@@ -234,6 +239,21 @@ Cards without a link (the page opens the job with JavaScript) can build the URL 
 attribute: `id_attr: data-id` and `url_template: "https://recruiter.example.test/job/{id}"`.
 Search pages work with `{query}` or `{query_slug}` in `url` and the source's `queries`.
 
+More options:
+
+```yaml
+  urls:                     # several listing pages in one source (instead of url)
+    - "https://recruiter.example.test/jobs/finance?page={page}"
+    - "https://recruiter.example.test/jobs/{query_slug}?page={page}"
+  date_regex: "Online since:\\s*(.+)"    # the date part of the date text (groups are joined)
+  location_regex: "\\d{4}\\s+(.+)$"      # the place part of the location text (no match: whole text)
+  delay_seconds: 10         # pause between listing requests (honour a robots.txt Crawl-delay)
+  detail: {jsonld: true}    # description, date and missing location from the job page's JSON-LD
+```
+
+A 404 on a later page, or on a keyword search, is read as "no more results" (many sites answer
+404 to an empty search). A 404 on the first page of a plain `url` is still an error.
+
 ### `jsonld_sitemap` / `jsonld_pages`
 
 For sites that embed schema.org `JobPosting` JSON-LD, as most recruiters do so that Google
@@ -249,6 +269,12 @@ Jobs can index them:
 ```
 
 `jsonld_pages` reads JobPosting objects directly from one or more listing pages (`urls:`).
+
+Sitemaps whose values are wrapped in `<![CDATA[…]]>` are read, job pages are fetched concurrently
+(within the per-host limit), a page that fails is skipped (the source only fails if all of them
+do), and JSON-LD with raw line breaks inside strings is accepted. If a site refreshes `lastmod`
+(and `datePosted`) every day, raise `max_urls` to cover all its jobs: the notification date is
+then the refresh date.
 
 ### `rss`
 
@@ -271,6 +297,25 @@ For small firms without a job list:
   selector: main                   # optional
   link_pattern: "/careers/.+"      # new matching links become jobs; without it: "page changed" alerts
 ```
+
+## Recruiters and headhunters
+
+Recruiter sites rarely run a mainstream ATS. What usually works, by platform:
+
+| Site looks like | Technique |
+|---|---|
+| Job pages with schema.org `JobPosting` and a job sitemap | `jsonld_sitemap` (dates from `datePosted`) |
+| Server-rendered listing (Drupal, Liferay, Laravel, custom) | `html_list`; several sector or keyword pages with `urls`; `detail: {jsonld: true}` when job pages carry JSON-LD |
+| WordPress with a job post type | its feed (`/<jobs-path>/feed/`) with `rss`; `pubDate` may be a sync time |
+| Manatal career pages (`<slug>.careers-page.com`) | `html_list` on `?page={page}` (`article.job-card`); no dates |
+| Single-page app over a JSON API (Sitecore/Next.js search APIs, Supabase REST…) | `json_api` with the same request the page makes (a public `apikey` header if the page sends one) |
+| Bot protection (PerimeterX/HUMAN, Vercel checkpoint, Cloudflare challenge) | not reachable from GitHub Actions: create job alerts to your alerts mailbox and read them with `email_alerts` (`ai_senders`) |
+| Executive search firms that publish no mandates | nothing to watch: register your CV in their database |
+
+Check `robots.txt` first: do not read disallowed paths, honour `Crawl-delay` with `delay_seconds`,
+and use `use_ai: false` when it says `Content-Signal: ai-input=no`. Job sites answer datacenter
+IPs differently from home connections, so confirm a new source from Actions with
+`mode: test-source` (source number) or a `dry-run` of its group.
 
 ## Adding a new adapter (developers)
 

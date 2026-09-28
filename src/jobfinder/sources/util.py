@@ -27,6 +27,14 @@ def html_to_text(value: str | None, limit: int | None = None) -> str:
     return text[:limit] if limit else text
 
 
+_CDATA = re.compile(r"<!\[CDATA\[(.*?)\]\]>", re.S)
+
+
+def unwrap_cdata(xml: str) -> str:
+    """Turn ``<![CDATA[x]]>`` into escaped text: the HTML parser would read CDATA as a comment (empty text)."""
+    return _CDATA.sub(lambda m: html.escape(m.group(1), quote=False), xml)
+
+
 def skip_without(*env_names: str) -> None:
     """Skip the source (not a failure) when optional credentials are not configured."""
     from .base import SkipSource
