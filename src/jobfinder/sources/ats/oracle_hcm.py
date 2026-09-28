@@ -26,7 +26,7 @@ class OracleHCM(Adapter):
     def detect(cls, url: str) -> dict[str, Any] | None:
         parts = urlsplit(url)
         m = _SITE.search(parts.path)
-        if m and _HOST.search(parts.netloc):
+        if m and _HOST.search(parts.hostname or ""):
             return {"host": parts.netloc, "site": m["site"], "lang": m["lang"]}
         return None
 

@@ -17,6 +17,8 @@ import time
 from collections.abc import Callable
 from typing import Any, TypeVar
 
+from pydantic import ValidationError
+
 from .. import log
 from ..config.schema import Config, LLMProvider
 from ..models import Job, Verdict
@@ -131,15 +133,31 @@ class LLMMatcher:
         self.providers = [p for p in self.cfg.providers if os.environ.get(p.api_key_env)]
         self._broken: set[str] = set()
         self._failures: dict[str, int] = {}  # consecutive failures per provider
-        self._spent = 0.0  # seconds spent waiting for the providers in this run
+        self._spent = 0.0  # seconds with at least one request in flight (concurrent requests count once)
+        self._inflight = 0
+        self._busy_since = 0.0
 
     @property
     def available(self) -> bool:
         return self.cfg.enabled and bool(self.providers)
 
     @property
+    def spent_seconds(self) -> float:
+        return self._spent + (time.monotonic() - self._busy_since if self._inflight else 0.0)
+
+    @property
     def budget_left(self) -> bool:
-        return self.calls < self.cfg.max_calls_per_run and self._spent < self.cfg.max_seconds_per_run
+        return self.calls < self.cfg.max_calls_per_run and self.spent_seconds < self.cfg.max_seconds_per_run
+
+    def _begin(self) -> None:
+        if not self._inflight:
+            self._busy_since = time.monotonic()
+        self._inflight += 1
+
+    def _end(self) -> None:
+        self._inflight -= 1
+        if not self._inflight:
+            self._spent += time.monotonic() - self._busy_since
 
     def _failed(self, provider: LLMProvider, fatal: bool) -> None:
         """Count a failed request; a provider that keeps failing (503, bad JSON, timeouts) is dropped for this run."""
@@ -177,7 +195,7 @@ class LLMMatcher:
         for provider in self.providers:
             if provider.name in self._broken or not self.budget_left:
                 continue
-            started = time.monotonic()
+            self._begin()
             try:
                 result = parse(await self._call(provider, system, user))
                 self._failures[provider.name] = 0
@@ -185,10 +203,12 @@ class LLMMatcher:
             except (HttpError, ValueError, KeyError, IndexError, TypeError) as exc:
                 why = f"HTTP {exc.status}" if isinstance(exc, HttpError) and exc.status else type(exc).__name__
                 log.info(f"ai: provider {provider.name} failed ({why}); trying next")
+                if isinstance(exc, ValidationError):
+                    continue  # the reply was JSON but the caller rejected its content: not the provider's fault
                 # Bad key, unknown model or quota spent: do not insist during this run.
                 self._failed(provider, fatal=isinstance(exc, HttpError) and exc.status in (401, 403, 404, 429))
             finally:
-                self._spent += time.monotonic() - started
+                self._end()
         return None
 
     async def score(self, jobs: list[Job]) -> dict[str, Verdict]:
@@ -198,7 +218,7 @@ class LLMMatcher:
         size = self.cfg.batch_size
         system = _system_prompt(self.config)
         for start in range(0, len(jobs), size):
-            if not self.budget_left or all(p.name in self._broken for p in self.providers):
+            if not self.budget_left or (self.providers and all(p.name in self._broken for p in self.providers)):
                 log.info("ai: budget exhausted or no provider left, remaining jobs use keyword rules")
                 break
             batch = jobs[start:start + size]

@@ -119,6 +119,27 @@ async def test_group_state_is_saved_before_the_run_ends(tmp_path, monkeypatch):
 
 
 @respx.mock
+async def test_checkpoint_covers_empty_notices_and_survives_failures(tmp_path, monkeypatch):
+    respx.post(url__startswith="https://api.telegram.org/").mock(return_value=httpx.Response(200, json={"ok": True}))
+    write_config(tmp_path)
+    await run(None, tmp_path, groups=["company_sites"], now=NOW)
+    messages: list[str] = []
+
+    def failing_commit(data_dir, message, push=True, rewrite=None, attempts=4):
+        messages.append(message)
+        if len(messages) == 1:
+            raise RuntimeError("disk full")
+        return True
+
+    monkeypatch.setattr("jobfinder.app.commit_and_push", failing_commit)
+    # Evening slot: nothing new, but the "no news" notice is sent (notify_empty) and must be checkpointed;
+    # the failure of that checkpoint does not abort the run, whose final save still happens.
+    code = await run(None, tmp_path, groups=["company_sites"], now=NOW + timedelta(hours=11, minutes=5))
+    assert code == 0 and "Sin novedades" in "\n".join(telegram_texts(new_only=True))
+    assert [m.split()[1] for m in messages] == ["company_sites", "run"]
+
+
+@respx.mock
 async def test_favorite_then_digest_marked(tmp_path):
     respx.post(url__startswith="https://api.telegram.org/").mock(return_value=httpx.Response(200, json={"ok": True}))
     write_config(tmp_path, favorite=True)

@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 import httpx
 import pytest
 import respx
+from pydantic import BaseModel
 
 from jobfinder.app import run
 from jobfinder.app import test_ai as check_ai
@@ -248,6 +249,48 @@ async def test_ai_time_budget_leaves_the_rest_to_keyword_rules(monkeypatch):
     async with Http() as http:
         verdicts = await LLMMatcher(cfg, http).score(jobs)
     assert route.call_count == 1 and len(verdicts) == 1  # the budget was spent by the first call
+
+
+@respx.mock
+async def test_content_rejected_by_the_caller_does_not_drop_the_provider(monkeypatch):
+    monkeypatch.setenv("KEY_A", "a")
+    ok = {"choices": [{"message": {"content": json.dumps({"results": []})}}]}
+    route = respx.post("https://a.example.test/v1/chat/completions").mock(return_value=httpx.Response(200, json=ok))
+    cfg = make_config(llm={"enabled": True, "max_provider_failures": 2, "providers": [
+        {"name": "a", "base_url": "https://a.example.test/v1", "model": "m", "api_key_env": "KEY_A"}]})
+
+    class Answer(BaseModel):
+        jobs: list[str]
+
+    def parse(_text: str) -> Answer:
+        return Answer.model_validate({})  # the reply "is JSON" but its content is rejected
+
+    async with Http() as http:
+        matcher = LLMMatcher(cfg, http)
+        for _ in range(3):
+            assert await matcher.complete_json("s", "u", parse) is None
+    assert route.call_count == 3  # three rejected replies in a row, and the provider is still asked
+
+
+async def test_ai_time_budget_counts_concurrent_requests_once(monkeypatch):
+    clock = {"t": 100.0}
+    monkeypatch.setattr("jobfinder.matching.llm.time.monotonic", lambda: clock["t"])
+    cfg = make_config(llm={"enabled": True, "max_seconds_per_run": 15, "providers": []})
+    async with Http() as http:
+        matcher = LLMMatcher(cfg, http)
+        matcher._begin()
+        matcher._begin()  # two requests overlap
+        clock["t"] += 10
+        matcher._end()
+        clock["t"] += 2
+        assert matcher.spent_seconds == 12 and matcher.budget_left
+        matcher._end()
+        assert matcher.spent_seconds == 12  # 12 s of wall time, not 22
+        clock["t"] += 100  # idle time (fetching sources) is not AI time
+        assert matcher.spent_seconds == 12
+        matcher._begin()
+        clock["t"] += 4
+        assert not matcher.budget_left  # 16 s in total
 
 
 @respx.mock

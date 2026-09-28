@@ -124,6 +124,8 @@ async def run(
                 run_report["groups"][d.name] = {"kind": "summary", "delivered": code == 0,
                                                 "reports": list(reports)}
                 exit_code = max(exit_code, code)
+                if code == 0 and not dry_run:
+                    _checkpoint(config, state, data_dir, now, push, tracker, d.name, reports)
                 continue
             log.info(f"group #{idx}: {len(config.sources_for_group(d.name))} sources")
             outcome = await runner.run_group(d.name, group)
@@ -175,7 +177,8 @@ async def run(
                 buttons=tracker is not None and group.format == "per_job",
                 tracker_status=tracker.statuses() if tracker is not None else {},
             )
-            if n.empty and not group.notify_empty and not n.problems:
+            announced = not (n.empty and not group.notify_empty and not n.problems)
+            if not announced:
                 delivered = True
             else:
                 attempted, succeeded = await send_all(config, http, n)
@@ -192,10 +195,8 @@ async def run(
                     for dup in job.extra.get("duplicates", []):
                         state.mark_notified(dup, d.name, now, dup_of=job.key)
                 state.mark_group_run(d.name, now, d.slot)
-                if outcome.jobs:
-                    # A run cancelled by the workflow timeout must not forget what it already sent.
-                    _persist(config, state, data_dir, now, None, push, tracker=tracker,
-                             message=f"jobfinder: {d.name} {iso(now)}")
+                if announced:
+                    _checkpoint(config, state, data_dir, now, push, tracker, d.name)
             else:
                 log.warn(f"group #{idx}: no channel delivered; will retry on the next run")
 
@@ -235,6 +236,18 @@ async def _run_summary(config: Config, state: State, tracker: Tracker | None, ht
     reports[weekly.path] = weekly.markdown
     state.mark_group_run(due.name, now, due.slot)
     return 0
+
+
+def _checkpoint(config: Config, state: State, data_dir: Path, now: datetime, push: bool, tracker: Tracker | None,
+                group: str, reports: dict[str, str] | None = None) -> None:
+    """Save state right after a group sent something, so a run cancelled by the workflow timeout (or a
+    crash later on) does not forget it and send it again. The final persist of the run repeats the job;
+    a failure here must not stop the remaining groups."""
+    try:
+        _persist(config, state, data_dir, now, None, push, tracker=tracker, reports=reports,
+                 message=f"jobfinder: {group} {iso(now)}")
+    except Exception as exc:  # never lose the other groups over a failed checkpoint
+        log.warn(f"checkpoint after group failed ({type(exc).__name__}); the final save will retry")
 
 
 def _persist(config: Config, state: State, data_dir: Path, now: datetime, report: dict | None, push: bool,

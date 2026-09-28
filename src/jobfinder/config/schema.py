@@ -223,7 +223,7 @@ class LLMConfig(_Model):
         2, ge=1, description="A provider that fails this many requests in a row is skipped for the rest of the run."
     )
     max_seconds_per_run: float = Field(
-        600, gt=0, description="AI time budget of one run; after it the remaining jobs use keyword rules."
+        600, gt=0, description="AI time budget of one run, checked between requests; after it the remaining jobs use keyword rules."
     )
     temperature: float = 0.1
     extra_instructions: str = ""
