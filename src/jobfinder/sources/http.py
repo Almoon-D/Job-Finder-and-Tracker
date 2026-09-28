@@ -53,13 +53,16 @@ class Http:
             self._sems[host] = asyncio.Semaphore(self.cfg.max_per_host)
         return self._sems[host]
 
-    async def request(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
+    async def request(self, method: str, url: str, retry_statuses: set[int] | None = None,
+                      **kwargs: Any) -> httpx.Response:
+        """``retry_statuses`` overrides which HTTP statuses are retried (e.g. not 429 for quota errors)."""
         last_exc: Exception | None = None
+        retry_on = RETRY_STATUS if retry_statuses is None else retry_statuses
         for attempt in range(self.cfg.retries + 1):
             try:
                 async with self._sem(url):
                     resp = await self._client.request(method, url, **kwargs)
-                if resp.status_code in RETRY_STATUS and attempt < self.cfg.retries:
+                if resp.status_code in retry_on and attempt < self.cfg.retries:
                     retry_after = resp.headers.get("Retry-After", "")
                     delay = float(retry_after) if retry_after.isdigit() else 2 ** (attempt + 1)
                     await asyncio.sleep(min(delay, 30) + random.random())

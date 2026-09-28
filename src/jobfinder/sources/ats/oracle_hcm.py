@@ -76,10 +76,11 @@ class OracleHCM(Adapter):
     async def fetch(self) -> list[Job]:
         jobs: list[Job] = []
         countries = self.ctx.locations.countries()
-        if not countries:
+        if not countries and self.full_listing:
             jobs += await self._search(None, None, self.source.max_pages)
         for iso2 in countries:
-            jobs += await self._search(country_name(iso2), None, self.source.max_pages)
+            if self.full_listing:
+                jobs += await self._search(country_name(iso2), None, self.source.max_pages)
             for q in self.search_terms():
                 jobs += await self._search(country_name(iso2), q, 2)
         for q in self.coverage_terms():

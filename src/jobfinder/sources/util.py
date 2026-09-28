@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import html
+import os
 import re
 from typing import Any
 from urllib.parse import urljoin
@@ -24,6 +25,22 @@ def html_to_text(value: str | None, limit: int | None = None) -> str:
         text = html.unescape(value)
     text = re.sub(r"\s+", " ", text).strip()
     return text[:limit] if limit else text
+
+
+def skip_without(*env_names: str) -> None:
+    """Skip the source (not a failure) when optional credentials are not configured."""
+    from .base import SkipSource
+
+    missing = [n for n in env_names if not os.environ.get(n, "").strip()]
+    if missing:
+        raise SkipSource(f"no credentials: set {', '.join(missing)}")
+
+
+def slug(value: str) -> str:
+    """URL slug of a search term: 'Banca Privada' -> 'banca-privada' (accents removed)."""
+    from ..models import normalize_text
+
+    return normalize_text(value).replace(" ", "-")
 
 
 def absolute(base: str, href: str | None) -> str:

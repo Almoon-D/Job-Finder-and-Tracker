@@ -1,0 +1,43 @@
+{
+ "start": 0,
+ "rows": 20,
+ "num_pages": 1,
+ "current_page": 1,
+ "total_hits": 2,
+ "documents": [
+  {
+   "_links": {
+    "detail_fr": {
+     "href": "https://www.jobup.ch/fr/emplois/detail/00000001-aaaa-bbbb-cccc-dddddddddddd/"
+    },
+    "detail_en": {
+     "href": "https://www.jobup.ch/en/jobs/detail/00000001-aaaa-bbbb-cccc-dddddddddddd/"
+    }
+   },
+   "job_id": "00000001-aaaa-bbbb-cccc-dddddddddddd",
+   "title": "Gestionnaire de fortune senior",
+   "company_name": "Acme Private Bank",
+   "company_visible": true,
+   "place": "Gen\u00e8ve",
+   "publication_date": "2026-09-26T10:16:25+02:00",
+   "preview": "Short preview"
+  },
+  {
+   "_links": {
+    "detail_fr": {
+     "href": "https://www.jobup.ch/fr/emplois/detail/00000002-aaaa-bbbb-cccc-dddddddddddd/"
+    },
+    "detail_en": {
+     "href": "https://www.jobup.ch/en/jobs/detail/00000002-aaaa-bbbb-cccc-dddddddddddd/"
+    }
+   },
+   "job_id": "00000002-aaaa-bbbb-cccc-dddddddddddd",
+   "title": "Conseiller client\u00e8le priv\u00e9e",
+   "company_name": "Umbrella Gestion SA",
+   "company_visible": true,
+   "place": "Lausanne",
+   "publication_date": "2026-09-25T09:00:00+02:00",
+   "preview": "Short preview"
+  }
+ ]
+}

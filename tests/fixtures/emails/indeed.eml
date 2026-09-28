@@ -1,0 +1,31 @@
+From: Indeed <alert@indeed.com>
+To: alerts@example.test
+Subject: Banca privada en Madrid
+Date: Sat, 26 Sep 2026 08:15:00 +0000
+MIME-Version: 1.0
+Content-Type: multipart/alternative;
+ boundary="===============6997649587454715978=="
+
+--===============6997649587454715978==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+See the HTML version.
+
+--===============6997649587454715978==
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+MIME-Version: 1.0
+
+
+<html><body>
+<div><a href=3D"https://click.tracker.example.test/c?u=3Dhttps%3A%2F%2Fes.ind=
+eed.com%2Frc%2Fclk%2Fdl%3Fjk%3D0123456789abcdef%26from%3Dja%26tk%3D1&sig=3Dab=
+c">Gestor de banca privada</a>
+<div>Banco Ficticio</div><div>Madrid, Madrid provincia</div></div>
+<div><a href=3D"https://es.indeed.com/pagead/clk/dl?mo=3Dr&jk=3Dfedcba9876543=
+210&ad=3Dxyz">Asesor patrimonial</a>
+<div>Gestora Ejemplo - Barcelona</div></div>
+</body></html>
+
+--===============6997649587454715978==--

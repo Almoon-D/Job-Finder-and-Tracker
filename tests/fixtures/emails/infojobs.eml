@@ -1,0 +1,28 @@
+From: InfoJobs <noreply@push.infojobs.net>
+To: alerts@example.test
+Subject: Nuevas ofertas
+Date: Sat, 26 Sep 2026 08:15:00 +0000
+MIME-Version: 1.0
+Content-Type: multipart/alternative;
+ boundary="===============8846457166338659996=="
+
+--===============8846457166338659996==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+See the HTML version.
+
+--===============8846457166338659996==
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+MIME-Version: 1.0
+
+
+<html><body><ul>
+<li><a href=3D"https://www.infojobs.net/madrid/banquero-privado/of-i012345678=
+9abcdef0123456789abcd?applicationOrigin=3Dalert&utm_source=3Dmail">Banquero p=
+rivado</a>
+<br>Banco Ficticio<br>Madrid</li>
+</ul></body></html>
+
+--===============8846457166338659996==--

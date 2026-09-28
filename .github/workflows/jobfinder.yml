@@ -19,9 +19,9 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "run | dry-run | test-notify | bootstrap | validate"
+        description: "run | dry-run | test-notify | test-ai | test-source | bootstrap | validate"
         type: choice
-        options: [run, dry-run, test-notify, bootstrap, validate]
+        options: [run, dry-run, test-notify, test-ai, test-source, bootstrap, validate]
         default: run
       groups:
         description: "Only these groups (comma separated, optional)"
@@ -31,6 +31,10 @@ on:
         description: "Run the groups even if they are not due"
         type: boolean
         default: false
+      source:
+        description: "test-source: source number as shown in the logs, e.g. 7 (a name would appear in the public log)"
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -109,6 +113,7 @@ jobs:
           MODE: ${{ inputs.mode || 'run' }}
           ONLY_GROUPS: ${{ inputs.groups }}
           FORCE: ${{ inputs.force }}
+          SOURCE: ${{ inputs.source }}
         run: |
           args=(--data-dir data)
           [ -n "$ONLY_GROUPS" ] && args+=(--groups "$ONLY_GROUPS")
@@ -119,6 +124,8 @@ jobs:
             dry-run)     uv run --no-sync jobfinder dry-run "${args[@]}" ;;
             bootstrap)   uv run --no-sync jobfinder bootstrap "${args[@]}" ;;
             test-notify) uv run --no-sync jobfinder test-notify --data-dir data ;;
+            test-ai)     uv run --no-sync jobfinder test-ai --data-dir data ;;
+            test-source) uv run --no-sync jobfinder test-source --data-dir data "$SOURCE" ;;
             validate)    uv run --no-sync jobfinder validate-config --data-dir data ;;
             *) echo "::error::unknown mode"; exit 1 ;;
           esac

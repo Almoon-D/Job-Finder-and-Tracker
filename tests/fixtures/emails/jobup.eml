@@ -1,0 +1,26 @@
+From: jobup.ch <noreply@jobup.ch>
+To: alerts@example.test
+Subject: Nouvelles offres
+Date: Sat, 26 Sep 2026 08:15:00 +0000
+MIME-Version: 1.0
+Content-Type: multipart/alternative;
+ boundary="===============5881179001138836920=="
+
+--===============5881179001138836920==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+See the HTML version.
+
+--===============5881179001138836920==
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+MIME-Version: 1.0
+
+
+<html><body><table><tr><td>
+<a href=3D"https://www.jobup.ch/fr/emplois/detail/11111111-2222-3333-4444-555=
+555555555/?utm_source=3Dalert">Gestionnaire de fortune</a>
+<br>Umbrella Gestion SA<br>Lausanne</td></tr></table></body></html>
+
+--===============5881179001138836920==--

@@ -120,6 +120,7 @@ async def run(
                 "matches": len(outcome.jobs),
                 "ai_scored": outcome.scored_by_ai,
                 "rejected": outcome.rejected,
+                "also_elsewhere": outcome.also_elsewhere,
                 "sources_ok": outcome.sources_ok,
                 "sources_total": outcome.sources_total,
                 "errors": {s.name: state.source_info(s.key).get("last_error")
@@ -149,6 +150,9 @@ async def run(
                 sources_total=outcome.sources_total,
                 problems=[] if group.interval_minutes else _problems(config, state, config.sources_for_group(d.name)),
                 max_items=group.max_items,
+                family_labels={f.name: f.label or f.name.replace("_", " ").capitalize() for f in config.role_families},
+                place_order=[tg.display for tg in runner.locations.targets],
+                also_elsewhere=outcome.also_elsewhere,
             )
             if n.empty and not group.notify_empty and not n.problems:
                 delivered = True
@@ -206,3 +210,26 @@ async def test_notify(config_path: str | None, data_dir: Path) -> int:
     if attempted == 0:
         log.warn("no notification channel is enabled in the config")
     return 0 if attempted and succeeded == attempted else 1
+
+
+async def test_ai(config_path: str | None, data_dir: Path) -> int:
+    """Check every AI provider that has a key. Prints provider names (from the example config) and status only."""
+    from .matching.llm import LLMMatcher
+
+    config = load_or_report(config_path, data_dir, push=False)
+    if not config.llm.enabled:
+        log.info("ai: disabled in the config")
+        return 0
+    async with Http(config.http) as http:
+        matcher = LLMMatcher(config, http)
+        without_key = len(config.llm.providers) - len(matcher.providers)
+        if not matcher.providers:
+            log.warn("ai: no provider has its API key set")
+            return 1
+        results = await matcher.check()
+    index = {id(p): i for i, p in enumerate(config.llm.providers, 1)}
+    for provider, status, seconds in results:
+        log.info(f"ai: provider #{index[id(provider)]} ({provider.name}): {status} in {seconds:.1f}s")
+    if without_key:
+        log.info(f"ai: {without_key} provider(s) without API key skipped")
+    return 0 if any(status == "OK" for _, status, _ in results) else 1

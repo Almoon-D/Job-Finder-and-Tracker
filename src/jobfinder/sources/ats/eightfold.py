@@ -95,10 +95,11 @@ class Eightfold(Adapter):
     async def _fetch_with(self, search) -> list[Job]:
         jobs: list[Job] = []
         places = self.ctx.locations.cities() + [country_name(c) for c in self.ctx.locations.countries()]
-        if not places:
+        if not places and self.full_listing:
             jobs += await search(None, None, self.source.max_pages)
         for place in places:
-            jobs += await search(place, None, self.source.max_pages)
+            if self.full_listing:
+                jobs += await search(place, None, self.source.max_pages)
             for q in self.search_terms():
                 jobs += await search(place, q, 2)
         for q in self.coverage_terms():

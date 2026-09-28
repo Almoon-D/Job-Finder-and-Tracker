@@ -10,14 +10,18 @@ from pathlib import Path
 from . import log, sources  # noqa: F401  (registers adapters)
 from .config.loader import load_config
 from .config.schema import Config, Source
+from .matching.llm import LLMMatcher
 from .matching.location import LocationMatcher
-from .sources.base import FetchContext, build_adapter
+from .sources.base import FetchContext, SkipSource, build_adapter
 from .sources.http import Http
 from .state import State, now_utc
 
 
 def _find_source(config: Config | None, ref: str, type_: str | None) -> tuple[Config, Source]:
     if config is not None:
+        number = ref.lstrip("#")
+        if number.isdigit() and 1 <= int(number) <= len(config.sources):  # "#7": the number shown in CI logs
+            return config, config.sources[int(number) - 1]
         for s in config.sources:
             if ref in (s.name, s.key):
                 return config, s
@@ -41,9 +45,14 @@ async def test_source(args: argparse.Namespace, data_dir: Path) -> int:
     matcher = LocationMatcher([] if args.no_location_filter else config.locations, config.coverage)
     state = State(Path(tempfile.gettempdir()) / "jobfinder-test-source")  # never saved
     async with Http(config.http) as http:
-        ctx = FetchContext(http, config, source, state, now_utc(), matcher, 3.0)
+        max_age = config.groups[source.group].max_age_days if source.group in config.groups else 3.0
+        ctx = FetchContext(http, config, source, state, now_utc(), matcher, max_age, LLMMatcher(config, http))
         adapter = build_adapter(ctx)
-        jobs = await adapter.fetch()
+        try:
+            jobs = await adapter.fetch()
+        except SkipSource as exc:
+            print(f"adapter: {adapter.type_name} | skipped: {exc}")
+            return 0
         kept = [j for j in jobs if matcher.empty or not j.locations or matcher.matches(j.locations, j.title)[0]]
         print(f"adapter: {adapter.type_name} | fetched: {len(jobs)} | in configured locations: {len(kept)}")
         if ci:

@@ -101,7 +101,7 @@ class SuccessFactors(Adapter):
     async def fetch(self) -> list[Job]:
         if self.params.get("mode") == "legacy":
             return await self._legacy()
-        jobs = await self._rmk_search("", int(self.params.get("pages", 8)))
+        jobs = await self._rmk_search("", int(self.params.get("pages", 8))) if self.full_listing else []
         for q in self.search_terms():
             jobs += await self._rmk_search(q, 2)
         for q in self.coverage_terms():
