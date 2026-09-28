@@ -141,6 +141,8 @@ class Group(_Model):
     def _schedule(self) -> Group:
         if self.kind == "jobs" and not self.times and not self.interval_minutes:
             raise ValueError("a group needs 'times' or 'interval_minutes'")
+        if self.kind == "summary" and not self.times:
+            raise ValueError("a summary group needs 'times' (e.g. times: ['18:00'] and weekdays: [sun])")
         return self
 
     def weekday_numbers(self) -> set[int] | None:
@@ -266,6 +268,15 @@ class NotifyConfig(_Model):
     health_alert_after_failures: int = Field(2, ge=1)
 
 
+class TrackerConfig(_Model):
+    """Application tracker: Telegram buttons on per-job messages, kept in tracker/applications.csv."""
+
+    enabled: bool = Field(True, description="Buttons and sync (only when notify.telegram is enabled).")
+    follow_up_days: int = Field(
+        14, ge=1, description="/pendientes also lists applications without changes for this many days."
+    )
+
+
 class FeedsConfig(_Model):
     enabled: bool = True
     max_items: int = 300
@@ -297,6 +308,7 @@ class Config(_Model):
     sources: list[Source] = Field(default_factory=list)
     llm: LLMConfig = Field(default_factory=lambda: LLMConfig(enabled=False))
     notify: NotifyConfig = Field(default_factory=NotifyConfig)
+    tracker: TrackerConfig = Field(default_factory=TrackerConfig)
     feeds: FeedsConfig = Field(default_factory=FeedsConfig)
     http: HttpConfig = Field(default_factory=HttpConfig)
 

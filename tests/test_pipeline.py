@@ -9,7 +9,7 @@ import httpx
 import pytest
 import respx
 
-from jobfinder.app import run
+from jobfinder.app import run, tracker_sync
 from jobfinder.state import State
 
 from .conftest import NOW, FakeAdapter
@@ -70,7 +70,8 @@ def telegram_texts(new_only: bool = False) -> list[str]:
     calls = list(respx.calls)
     start = _seen_calls["n"] if new_only else 0
     _seen_calls["n"] = len(calls)
-    return [json.loads(c.request.content)["text"] for c in calls[start:] if "api.telegram.org" in str(c.request.url)]
+    return [json.loads(c.request.content)["text"] for c in calls[start:]
+            if "api.telegram.org" in str(c.request.url) and str(c.request.url).endswith("/sendMessage")]
 
 
 @respx.mock
@@ -229,6 +230,18 @@ async def test_ci_logs_are_redacted(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(email_alerts.imaplib, "IMAP4_SSL", FakeIMAP)
     FakeIMAP.validity, FakeIMAP.commands = b"1", []
     FakeIMAP.messages = {1: (EMAILS / "linkedin.eml").read_bytes(), 2: (EMAILS / "unknown.eml").read_bytes()}
+    private_updates = [
+        {"update_id": 5, "callback_query": {"id": "q", "data": "jf1:applied:0123456789ab", "message": {
+            "message_id": 3, "chat": {"id": 42}, "text": "Secret Corp — Product Manager DACH"}}},
+        {"update_id": 6, "message": {"message_id": 4, "chat": {"id": 42}, "text": "/pendientes"}},
+        {"update_id": 7, "message": {"message_id": 5, "chat": {"id": 777}, "text": "Hidden stranger text"}},
+    ]
+    respx.post(url__regex=r"/getUpdates$").mock(side_effect=[
+        httpx.Response(200, json={"ok": True, "result": private_updates}),
+        httpx.Response(200, json={"ok": True, "result": []}),
+        httpx.Response(200, json={"ok": True, "result": []}),
+        httpx.Response(200, json={"ok": True, "result": []}),
+    ])
     respx.post(url__startswith="https://api.telegram.org/").mock(return_value=httpx.Response(200, json={"ok": True}))
     answer = {"results": [{"id": "0", "score": 90, "family": "product", "reason": "Motivo privado"}]}
     respx.post("https://ai.example.test/v1/chat/completions").mock(return_value=httpx.Response(
@@ -239,7 +252,8 @@ async def test_ci_logs_are_redacted(tmp_path, monkeypatch, capsys):
 """
     write_config(tmp_path, llm=llm)
     cfg = (tmp_path / "config.yaml").read_text()
-    cfg = cfg.replace("groups:\n", "groups:\n" + BOARDS.strip("\n") + "\n")
+    cfg = cfg.replace("groups:\n", "groups:\n" + BOARDS.strip("\n") + "\n"
+                      + '  weekly_summary: {kind: summary, times: ["18:00"], weekdays: [sun]}\n')
     cfg = cfg.replace("sources:\n", "sources:" + BOARD_SOURCES)
     (tmp_path / "config.yaml").write_text(cfg)
     from jobfinder import log
@@ -247,7 +261,9 @@ async def test_ci_logs_are_redacted(tmp_path, monkeypatch, capsys):
     log.set_verbose(True)  # even with --verbose, CI must stay quiet
     try:
         await run(None, tmp_path, groups=["company_sites", "boards"], now=NOW, dry_run=True)
+        await tracker_sync(None, tmp_path, push=False, now=NOW + timedelta(hours=1))
         await run(None, tmp_path, groups=["company_sites", "boards"], now=NOW + timedelta(hours=2), force=True)
+        await run(None, tmp_path, groups=["weekly_summary"], now=NOW + timedelta(hours=3), force=True)
         await check_ai(None, tmp_path)
     finally:
         log.set_verbose(False)
@@ -255,8 +271,12 @@ async def test_ci_logs_are_redacted(tmp_path, monkeypatch, capsys):
     logs = out.out + out.err
     for secret in ("Secret Corp", "Product Manager", "Data Analyst", "Berlin", "jobs.example.test", "company_sites",
                    "boards", "Hidden", "secret query", "Senior Private Banker", "Acme Private Bank", "linkedin.com",
-                   "private.inbox", "Private banker: 2 new jobs", "board.example.test", "Hooli", "Motivo privado"):
+                   "private.inbox", "Private banker: 2 new jobs", "board.example.test", "Hooli", "Motivo privado",
+                   "weekly_summary", "Resumen", "pendientes", "Hidden stranger", "123:abc", "0123456789ab"):
         assert secret not in logs, secret
+    assert "tracker: 3 updates (1 buttons, 1 commands, 1 ignored), 1 rows changed" in logs
+    assert "weekly summary with" in logs
+    assert (tmp_path / "tracker" / "applications.csv").exists()
     assert "source #1" in logs and "skipped (no credentials: set INFOJOBS_CLIENT_ID" in logs
     assert "email: 2 new messages" in logs
 

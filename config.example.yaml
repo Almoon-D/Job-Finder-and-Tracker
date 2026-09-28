@@ -66,6 +66,10 @@ groups:
     times: ["11:00"]
     every_days: 3
     max_age_days: 3.5
+  weekly_summary:                # weekly report to every channel + reports/weekly/YYYY-Www.md
+    kind: summary
+    times: ["18:00"]
+    weekdays: [sun]
 
 sources:
   # Paste a careers URL: the adapter is detected automatically for Workday,
@@ -161,5 +165,11 @@ notify:                          # credentials always come from GitHub Secrets
   ntfy: {enabled: false}
   apprise: {enabled: false}
 
-feeds:
+# Tracker: ⭐/✅/🗣/❌ buttons on per-job Telegram messages, saved in tracker/applications.csv
+# of the private repo (editable by hand). Commands: /status and /pending (or /estado, /pendientes).
+tracker:
+  enabled: true                  # only with notify.telegram
+  follow_up_days: 14             # /pending also lists applications without news for this long
+
+feeds:                           # feeds/*.json and jobs.xml for dashboards (docs/DASHBOARDS.md)
   enabled: true

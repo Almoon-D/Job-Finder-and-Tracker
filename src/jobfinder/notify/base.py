@@ -18,6 +18,15 @@ class ChannelError(Exception):
 
 
 @dataclass
+class Report:
+    """A text report (e.g. the weekly summary) sent instead of a list of jobs."""
+
+    title: str
+    sections: list[tuple[str, list[str]]]  # (heading, plain-text lines)
+    footer: list[str] = field(default_factory=list)
+
+
+@dataclass
 class Notification:
     group: str
     label: str
@@ -35,6 +44,10 @@ class Notification:
     family_labels: dict[str, str] = field(default_factory=dict)  # family name -> display name, in config order
     place_order: list[str] = field(default_factory=list)  # location display names, in config order
     also_elsewhere: int = 0  # matches not repeated because another group already sent them
+    buttons: bool = False  # Telegram per-job tracker buttons
+    tracker_status: dict[str, str] = field(default_factory=dict)  # job id -> current tracker status
+    sent: list[tuple[str, str, str, int]] = field(default_factory=list)  # (job id, job key, chat, message id)
+    report: Report | None = None
 
     @property
     def empty(self) -> bool:
@@ -50,6 +63,8 @@ class Notification:
 
     @property
     def title(self) -> str:
+        if self.report is not None:
+            return self.report.title
         if self.test:
             return f"🔔 {t(self.lang, 'test_title')}"
         icon = "⚡" if self.priority == "high" else "💼"

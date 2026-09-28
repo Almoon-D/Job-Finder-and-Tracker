@@ -45,3 +45,13 @@ def test_default_env_names_are_passed(workflow):
     for name, value in env.items():
         if value.startswith("${{ secrets."):
             assert value == f"${{{{ secrets.{name} }}}}", name
+
+
+def test_tracker_sync_mode_has_its_own_queue():
+    data = yaml.safe_load((ROOT / ".github" / "workflows" / "jobfinder.yml").read_text(encoding="utf-8"))
+    on = data.get("on") or data.get(True)  # YAML 1.1 reads the key `on` as True
+    assert "tracker-sync" in on["workflow_dispatch"]["inputs"]["mode"]["options"]
+    # A queued tracker-sync must not replace a pending real run of the main queue.
+    assert "tracker-sync" in data["concurrency"]["group"] and "main" in data["concurrency"]["group"]
+    run_step = next(s for s in data["jobs"]["run"]["steps"] if s.get("name") == "Run")["run"]
+    assert "tracker-sync) uv run --no-sync jobfinder tracker-sync --data-dir data" in run_step

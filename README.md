@@ -49,7 +49,14 @@ looking for.
   scheduler such as cron-job.org, or manually, and a slot is never notified twice. This
   matters because GitHub's cron can be hours late.
 - **Health alerts** when a source fails repeatedly or suddenly returns nothing.
-- **Private feeds** (JSON Feed, RSS, summary JSON) for dashboards like Glance or Homepage.
+- **Application tracker in Telegram**: every per-job alert has ⭐ Interested · ✅ Applied ·
+  🗣 Interview · ❌ Discard buttons. Presses are saved in `tracker/applications.csv` in the private
+  repo, a file you can also edit on the GitHub website. `/status` and `/pending` commands. There is
+  no server: the bot is polled at every run and by a `tracker-sync` run every 1–3 h.
+- **Weekly summary** to every channel, and saved as `reports/weekly/YYYY-Www.md`. It covers new jobs
+  per group, company and role family, matches against discards, the tracker funnel, and source health.
+- **Private feeds** (JSON Feed 1.1, RSS, summary and tracker JSON) for dashboards. Tested examples for
+  Glance and Homepage are in [docs/DASHBOARDS.md](docs/DASHBOARDS.md).
 
 ## How it works
 
@@ -66,7 +73,7 @@ cron / cron-job.org / manual ─► GitHub Actions (this public repo)
 | Where | What |
 |---|---|
 | Public repo (this one) | Code, workflows, docs. No personal data. |
-| Private data repo | `config.yaml`, `state/`, `runs/last_run.json`, `feeds/` |
+| Private data repo | `config.yaml`, `state/`, `runs/` (last run, daily stats), `feeds/`, `tracker/applications.csv`, `reports/weekly/` |
 | GitHub Secrets (public repo) | Tokens: data repo, Telegram, SMTP, Discord, ntfy, AI keys |
 
 See [docs/PRIVACY.md](docs/PRIVACY.md) for the full privacy model.
@@ -83,10 +90,10 @@ See [docs/PRIVACY.md](docs/PRIVACY.md) for the full privacy model.
    optionally, AI keys (`GEMINI_API_KEY`, `NVIDIA_API_KEY`, `GROQ_API_KEY`), `IMAP_*` for
    alert e-mails and `INFOJOBS_*` / `ADZUNA_*`. The workflows pass secrets one by one: a new
    secret name must also be added to their `env:` block.
-5. Run **Actions → jobfinder → Run workflow** with `mode: validate`, then `test-notify` and
-   `test-ai`.
+5. Run **Actions → jobfinder → Run workflow** with `mode: validate`, then `test-notify` (its
+   Telegram message shows the tracker buttons) and `test-ai`.
 6. Optional but recommended: trigger the workflows from [cron-job.org](https://cron-job.org)
-   for punctual alerts (see the setup guide).
+   for punctual alerts, and `mode: tracker-sync` every 1–3 h for the tracker (see the setup guide).
 
 ## Command line
 
@@ -98,6 +105,7 @@ uv run jobfinder test-source "Example Bank" --config my-config.yaml --details
 uv run jobfinder test-ai --config my-config.yaml                         # checks every AI provider
 uv run jobfinder dry-run --config my-config.yaml --data-dir /tmp/jf -v   # prints matches locally
 uv run jobfinder run --data-dir data                                     # what the workflow does
+uv run jobfinder tracker-sync --data-dir data                            # read tracker buttons/commands
 ```
 
 Outside CI, `-v` prints private details to your terminal. In CI, logs only ever show counts

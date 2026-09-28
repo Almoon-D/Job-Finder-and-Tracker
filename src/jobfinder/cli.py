@@ -46,6 +46,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--groups")
     p.add_argument("--no-push", action="store_true")
 
+    p = sub.add_parser("tracker-sync", help="read tracker buttons and commands from Telegram and save them")
+    _common(p)
+    p.add_argument("--no-push", action="store_true")
+
     p = sub.add_parser("validate-config", help="validate the config")
     _common(p)
 
@@ -91,6 +95,10 @@ def main(argv: list[str] | None = None) -> int:
                 bootstrap=args.cmd == "bootstrap",
                 skip_polling=getattr(args, "skip_polling", False),
             ))
+        if args.cmd == "tracker-sync":
+            from .app import tracker_sync
+
+            return asyncio.run(tracker_sync(args.config, data_dir, push=not args.no_push))
         if args.cmd == "validate-config":
             return _validate(args.config, data_dir)
         if args.cmd == "test-notify":

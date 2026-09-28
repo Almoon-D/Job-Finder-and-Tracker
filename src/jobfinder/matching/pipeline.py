@@ -34,6 +34,8 @@ class GroupOutcome:
     scored_by_ai: int = 0
     rejected: dict[str, int] = field(default_factory=dict)
     also_elsewhere: int = 0  # matches already notified in another group (not repeated)
+    # Per source, counted once per run: {key: {"ok": bool, "jobs": n, "seconds": s, "matches": n}}
+    source_stats: dict[str, dict] = field(default_factory=dict)
 
     def reject(self, reason: str) -> None:
         self.rejected[reason] = self.rejected.get(reason, 0) + 1
@@ -120,6 +122,8 @@ class Runner:
             if source.key not in self._recorded:  # a source shared by two groups counts once per run
                 self._recorded.add(source.key)
                 self.state.record_source_result(source.key, result.ok, len(result.jobs), result.error, self.now)
+                out.source_stats[source.key] = {"ok": result.ok, "jobs": len(result.jobs),
+                                                "seconds": round(result.duration, 2), "matches": 0}
             if not result.ok:
                 log.info(f"  {label} ({result.source_type}): error after {result.duration:.1f}s")
                 log.detail(f"{source.name}: {result.error}")
@@ -183,6 +187,9 @@ class Runner:
 
         matched = await self._score(stage2, out)
         out.jobs = self._dedupe(matched, name, out)
+        for job in out.jobs:
+            stats = out.source_stats.setdefault(job.source_key, {"matches": 0})
+            stats["matches"] = stats.get("matches", 0) + 1
         out.jobs.sort(key=lambda j: (-(j.score or 0), -(j.posted_at or j.first_seen or self.now).timestamp()))
         return out
 

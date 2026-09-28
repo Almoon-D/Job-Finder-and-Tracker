@@ -19,9 +19,9 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "run | dry-run | test-notify | test-ai | test-source | bootstrap | validate"
+        description: "run | dry-run | test-notify | test-ai | test-source | bootstrap | validate | tracker-sync"
         type: choice
-        options: [run, dry-run, test-notify, test-ai, test-source, bootstrap, validate]
+        options: [run, dry-run, test-notify, test-ai, test-source, bootstrap, validate, tracker-sync]
         default: run
       groups:
         description: "Only these groups (comma separated, optional)"
@@ -39,8 +39,10 @@ on:
 permissions:
   contents: read
 
+# tracker-sync (cron-job.org, every 1–3 h) has its own queue: GitHub cancels the *pending* run of a
+# concurrency group when another one is queued, and a sync must never replace a real run.
 concurrency:
-  group: jobfinder-main
+  group: jobfinder-${{ inputs.mode == 'tracker-sync' && 'tracker' || 'main' }}
   cancel-in-progress: false
 
 jobs:
@@ -73,6 +75,7 @@ jobs:
 
       - name: Browser needed?
         id: browser
+        if: inputs.mode != 'tracker-sync'
         run: uv run --no-sync jobfinder needs-browser --data-dir data
 
       - name: Install headless browser
@@ -127,6 +130,7 @@ jobs:
             test-ai)     uv run --no-sync jobfinder test-ai --data-dir data ;;
             test-source) uv run --no-sync jobfinder test-source --data-dir data "$SOURCE" ;;
             validate)    uv run --no-sync jobfinder validate-config --data-dir data ;;
+            tracker-sync) uv run --no-sync jobfinder tracker-sync --data-dir data ;;
             *) echo "::error::unknown mode"; exit 1 ;;
           esac
 

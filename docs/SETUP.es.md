@@ -79,6 +79,10 @@ Activa en `config.yaml` (`notify:`) los canales que vayas a usar.
 3. Abre `https://api.telegram.org/bot<TOKEN>/getUpdates` en el navegador y copia el número
    de `"chat":{"id": ...}` → secret `TELEGRAM_CHAT_ID`.
 
+No configures un *webhook* en el bot (`setWebhook`). El tracker (§14) lee los botones con
+`getUpdates`, que no funciona si hay un webhook. Cuando el tracker ya está en marcha, es normal que
+esa URL de `getUpdates` salga vacía: la herramienta ya ha leído los mensajes.
+
 ### Email con Gmail
 1. Activa la **verificación en dos pasos** de tu cuenta de Google.
 2. Crea una **contraseña de aplicación** en <https://myaccount.google.com/apppasswords>.
@@ -145,7 +149,9 @@ Pestaña **Actions → jobfinder → Run workflow**:
 1. `mode: validate` comprueba la config. Si hay errores, el log solo dice en qué campo
    están y el detalle completo queda en `runs/config_error.txt` del repo privado.
 2. `mode: test-notify` envía un mensaje de prueba a cada canal activo, y `mode: test-ai`
-   comprueba los proveedores de IA.
+   comprueba los proveedores de IA. En Telegram, el mensaje de prueba trae los cuatro botones del
+   tracker. Pulsa uno, lanza `mode: tracker-sync` y verás el botón marcado (`» ✅ Aplicado «`). No
+   se guarda nada.
 3. `mode: run` con `force: true` hace una primera ejecución real.
    - En esa primera pasada, las ofertas **sin fecha** quedan como «línea base» y no se
      notifican, para no recibir una avalancha de golpe.
@@ -183,9 +189,17 @@ servicio externo gratuito «llama» a GitHub a la hora exacta.
    minutos:
    - URL: `.../actions/workflows/favorites.yml/dispatches`
    - Body: `{"ref":"main"}`
-4. No hace falta quitar los cron de GitHub: quedan de respaldo. La ejecución es
+4. **Tracker (§14)**: crea un tercer cronjob igual (mismas tres cabeceras, mismo PAT #2) **cada 2
+   horas**, las 24 h:
+   - URL: `.../actions/workflows/jobfinder.yml/dispatches`
+   - Body: `{"ref":"main","inputs":{"mode":"tracker-sync"}}`
+
+   Telegram solo guarda 24 h las pulsaciones de botones y los comandos. Este cronjob garantiza que
+   se leen aunque no haya otras ejecuciones, por ejemplo de noche. Tiene su propia cola, así que
+   nunca cancela una ejecución normal que esté esperando.
+5. No hace falta quitar los cron de GitHub: quedan de respaldo. La ejecución es
    **idempotente**, así que nunca recibirás un aviso duplicado aunque se disparen ambos.
-5. Cuando caduque el PAT #2, crea otro y sustitúyelo en la cabecera `Authorization` de los dos
+6. Cuando caduque el PAT #2, crea otro y sustitúyelo en la cabecera `Authorization` de los tres
    cronjobs.
 
 Los horarios reales de cada grupo se definen en `groups:` de tu `config.yaml`. Los cron de
@@ -206,18 +220,26 @@ config, ajusta también cron-job.org (o las líneas `cron:` de `.github/workflow
 
 Cada ejecución escribe en el repo privado:
 
-- `feeds/jobs.json` (JSON Feed 1.1)
-- `feeds/jobs.xml` (RSS 2.0)
-- `feeds/summary.json` (conteos y últimas ofertas)
+- `feeds/jobs.json`: JSON Feed 1.1.
+- `feeds/jobs.xml`: RSS 2.0.
+- `feeds/summary.json`: conteos, salud de las fuentes, tracker y últimas ofertas.
+- `feeds/tracker.json`: embudo del tracker y ofertas marcadas.
 
 Para leerlos desde un dashboard autoalojado:
 
 1. Crea un **PAT #3** de solo lectura: *Contents: Read-only* sobre `job-finder-data`.
 2. Usa la API de contenidos de GitHub:
    - URL: `https://api.github.com/repos/TU-USUARIO/job-finder-data/contents/feeds/summary.json`
-   - Cabeceras: `Authorization: Bearer <PAT #3>` y `Accept: application/vnd.github.raw+json`
+   - Cabeceras: `Authorization: Bearer <PAT #3>` y `Accept: application/vnd.github.raw+json`.
+     GitHub exige además un `User-Agent`. Glance lo envía solo; en Homepage hay que añadirlo.
 
-Ejemplos listos para Glance y Homepage llegarán en la sesión de dashboards.
+Tienes configuraciones completas y probadas en [DASHBOARDS.md](DASHBOARDS.md) (en inglés):
+
+- **Glance**: `custom-api` con contadores, embudo y últimas ofertas; widget del tracker; `rss` con
+  cabeceras por feed; historial de ntfy.
+- **Homepage**: `customapi` con contadores y listas de últimas ofertas y del tracker.
+- **ntfy**: solo recibe notificaciones y no puede leer URLs. Recibe los avisos y el resumen semanal.
+- **Discord**: por qué no hay botones.
 
 ## 11. Mantenimiento y problemas
 
@@ -292,3 +314,66 @@ mueve ni borra correos.
 Cada email se procesa una sola vez (se guarda el último UID en `state/runs.json`). Solo se miran
 los emails de los últimos 4–5 días. Los logs públicos solo muestran conteos
 (`email: 12 new messages … 30 jobs`).
+
+## 14. Tracker de candidaturas (Telegram)
+
+Cada oferta que llega en un mensaje individual (grupos con `format: per_job`, como
+`favorites` y `company_sites`) trae cuatro botones: **⭐ Interesa · ✅ Aplicado · 🗣 Entrevista ·
+❌ Descartar**.
+
+- **Cuándo se procesan.** GitHub Actions no puede recibir los clics al momento, porque no hay
+  servidor. La herramienta los lee al empezar cada ejecución normal: favoritas cada 10 minutos,
+  webs corporativas y demás. También con el cronjob `tracker-sync` (§8, cada 2 horas).
+  - Al pulsar, Telegram muestra un reloj que acaba desapareciendo solo.
+  - En la siguiente sincronización el botón aparece marcado (`» ✅ Aplicado «`) en todos los
+    mensajes de esa oferta.
+- **Límite de 24 horas.** Telegram solo guarda los clics y comandos 24 horas. Si en ese tiempo no
+  hay ninguna ejecución, se pierden: vuelve a pulsar.
+- **Dónde se guarda:** `tracker/applications.csv` del repo privado, con estas columnas: `id`,
+  `estado`, `fecha`, `empresa`, `puesto`, `ubicacion`, `url`, `notas`, `historial`.
+- **Se puede editar desde la web o la app de GitHub** (icono del lápiz):
+  - Cambia `estado` a mano. En la siguiente sincronización se apunta en `historial` con
+    «(manual)» y se actualizan los botones de Telegram.
+  - Estados reconocidos: `interesa`, `aplicado`, `entrevista`, `oferta`, `rechazado`,
+    `descartado`. `oferta` y `rechazado` solo se ponen a mano. Cualquier otro texto se respeta tal
+    cual.
+  - Escribe lo que quieras en `notas`: la herramienta nunca lo toca. También puedes añadir
+    columnas (por ejemplo `salario`).
+  - Puedes añadir filas de ofertas encontradas por tu cuenta, sin `id`: se les asigna uno solo.
+  - Si editas a la vez que se ejecuta el workflow, se combinan las dos versiones y no se pierde
+    ninguno de los cambios.
+- **Comandos** (escríbeselos al bot; responde en la siguiente sincronización):
+  - `/estado`: embudo y últimos 10 cambios.
+  - `/pendientes`: ofertas ⭐ sin aplicar, y aplicadas sin novedades desde hace 14 días o más
+    (`tracker.follow_up_days`).
+  - `/ayuda`: resumen de todo esto.
+- El bot solo hace caso al chat de `TELEGRAM_CHAT_ID`.
+- **Otros canales.** Discord no admite botones en mensajes enviados por webhook (ver
+  [DASHBOARDS.md](DASHBOARDS.md)). Email y ntfy tampoco llevan botones. En esos canales, el tracker
+  se lleva editando el CSV en la web.
+- **Desactivarlo:** `tracker: {enabled: false}` en la config.
+
+## 15. Resumen semanal
+
+Un grupo `kind: summary` (por ejemplo `weekly_summary`, domingos a las 18:00) envía a **todos los
+canales** un resumen de los 7 días anteriores:
+
+- Ofertas nuevas por grupo, empresa y familia de puesto.
+- Coincidencias frente a descartes, y por qué se descartó: ubicación, antigüedad, exclusiones,
+  encaje IA bajo, duplicadas…
+- Embudo del tracker y movimientos de la semana.
+- Salud y rendimiento de cada fuente: cuántas funcionan, cuáles dan más coincidencias y cuáles
+  tienen problemas.
+
+El informe completo, con tablas por fuente, se guarda en `reports/weekly/AAAA-Www.md` del repo
+privado (por ejemplo `2026-W39.md`). Los números salen de `runs/stats.json`, que acumula cada
+ejecución. Las revisiones de favoritas que no encuentran nada nuevo no se guardan, así que no
+cuentan.
+
+```yaml
+groups:
+  weekly_summary:
+    kind: summary
+    times: ["18:00"]
+    weekdays: [sun]
+```
