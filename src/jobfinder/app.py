@@ -12,10 +12,12 @@ from .config.schema import Config, Group, Source
 from .matching.pipeline import GroupOutcome, Runner
 from .notify.base import Notification
 from .notify.dispatch import send_all
-from .scheduling import due_groups
+from .scheduling import DueGroup, due_groups
 from .sources.http import Http
 from .state import State, iso, now_utc
+from .stats import RunStats
 from .storage.datarepo import commit_and_push
+from .tracker.store import Tracker, open_tracker
 
 DEFAULT_LABELS = {
     "es": {"company_sites": "Webs corporativas", "favorites": "Empresas favoritas", "boards": "Portales de empleo",
@@ -86,26 +88,42 @@ async def run(
     now = now or now_utc()
     if bootstrap:
         force = True
+    # Tracker buttons and commands are read at the start of every normal run (see tracker/sync.py).
+    tracker = None if dry_run or bootstrap else open_tracker(config, data_dir)
     due = due_groups(config, state, now, only=groups, force=force)
     if skip_polling:
         due = [d for d in due if not config.groups[d.name].interval_minutes]
+    due.sort(key=lambda d: config.groups[d.name].kind == "summary")  # summaries last: they count this run
     group_names = list(config.groups)
-    if not due:
-        log.info("nothing due")
-        return 0
-    log.info(f"groups due: {len(due)} ({', '.join('#' + str(group_names.index(d.name) + 1) for d in due)})")
 
     exit_code = 0
     run_report: dict = {"started_at": iso(now), "dry_run": dry_run, "bootstrap": bootstrap, "groups": {}}
+    stats = RunStats()
+    reports: dict[str, str] = {}
     async with Http(config.http) as http:
+        if tracker is not None:
+            from .tracker.sync import sync
+
+            await sync(config, http, tracker, state, now)
+        if not due:
+            log.info("nothing due")
+            if tracker is not None and tracker.changed:
+                _persist(config, state, data_dir, now, None, push, tracker=tracker,
+                         message=f"jobfinder: tracker sync {iso(now)}")
+            return 0
+        log.info(f"groups due: {len(due)} ({', '.join('#' + str(group_names.index(d.name) + 1) for d in due)})")
         runner = Runner(config, state, http, now, bootstrap=bootstrap)
         for d in due:
             group = config.groups[d.name]
             idx = group_names.index(d.name) + 1
             if group.kind == "summary":
-                log.info(f"group #{idx}: summary groups arrive in a later version; skipped")
-                if not dry_run:
-                    state.mark_group_run(d.name, now, d.slot)
+                if bootstrap:
+                    continue
+                code = await _run_summary(config, state, tracker, http, data_dir, now, d, idx, dry_run, stats,
+                                          reports)
+                run_report["groups"][d.name] = {"kind": "summary", "delivered": code == 0,
+                                                "reports": list(reports)}
+                exit_code = max(exit_code, code)
                 continue
             log.info(f"group #{idx}: {len(config.sources_for_group(d.name))} sources")
             outcome = await runner.run_group(d.name, group)
@@ -130,6 +148,7 @@ async def run(
             if bootstrap:
                 state.mark_group_run(d.name, now, d.slot)
                 continue
+            stats.add_group(d.name, run_report["groups"][d.name], outcome.source_stats)
             if dry_run:
                 if log.in_ci():
                     log.info("dry run in CI: matches are not printed (public logs)")
@@ -153,6 +172,8 @@ async def run(
                 family_labels={f.name: f.label or f.name.replace("_", " ").capitalize() for f in config.role_families},
                 place_order=[tg.display for tg in runner.locations.targets],
                 also_elsewhere=outcome.also_elsewhere,
+                buttons=tracker is not None and group.format == "per_job",
+                tracker_status=tracker.statuses() if tracker is not None else {},
             )
             if n.empty and not group.notify_empty and not n.problems:
                 delivered = True
@@ -161,11 +182,15 @@ async def run(
                 delivered = attempted == 0 or succeeded > 0
                 if attempted and not succeeded:
                     exit_code = 1
+            if tracker is not None:
+                day = tracker.today(now).isoformat()
+                for jid, key, chat, message_id in n.sent:
+                    tracker.remember(jid, key, chat, message_id, day)
             if delivered:
                 for job in outcome.jobs:
                     state.mark_notified(job, d.name, now)
                     for dup in job.extra.get("duplicates", []):
-                        state.mark_notified(dup, d.name, now)
+                        state.mark_notified(dup, d.name, now, dup_of=job.key)
                 state.mark_group_run(d.name, now, d.slot)
             else:
                 log.warn(f"group #{idx}: no channel delivered; will retry on the next run")
@@ -173,38 +198,108 @@ async def run(
     if dry_run:
         return exit_code
     only_polling = all(config.groups[d.name].interval_minutes for d in due)
-    if only_polling and not state.material and not bootstrap:
+    tracker_changed = tracker is not None and tracker.changed
+    if only_polling and not state.material and not bootstrap and not tracker_changed:
         log.info("polling run without material changes: state not committed")
         return exit_code
-    _persist(config, state, data_dir, now, run_report, push)
+    _persist(config, state, data_dir, now, run_report, push, tracker=tracker,
+             stats=None if bootstrap else stats, reports=reports)
     return exit_code
 
 
-def _persist(config: Config, state: State, data_dir: Path, now: datetime, report: dict, push: bool) -> None:
+async def _run_summary(config: Config, state: State, tracker: Tracker | None, http: Http, data_dir: Path,
+                       now: datetime, due: DueGroup, idx: int, dry_run: bool, stats: RunStats,
+                       reports: dict[str, str]) -> int:
+    """Build and send a weekly summary; its Markdown file is written when the run is persisted."""
+    from .weekly import build_weekly
+
+    group = config.groups[due.name]
+    tracker = tracker or open_tracker(config, data_dir)  # dry runs: read only, never saved
+    labels = {name: group_label(config, name, g) for name, g in config.groups.items()}
+    weekly = build_weekly(config, state, tracker, data_dir, due.slot or now, group_label(config, due.name, group),
+                          labels, stats)
+    log.info(f"group #{idx}: weekly summary with {weekly.total} new jobs")
+    if dry_run:
+        if not log.in_ci():
+            print(weekly.markdown)
+        return 0
+    n = Notification(due.name, weekly.report.title, [], config.language, config.tz, now, report=weekly.report)
+    attempted, succeeded = await send_all(config, http, n)
+    if attempted and not succeeded:
+        log.warn(f"group #{idx}: no channel delivered; will retry on the next run")
+        return 1
+    reports[weekly.path] = weekly.markdown
+    state.mark_group_run(due.name, now, due.slot)
+    return 0
+
+
+def _persist(config: Config, state: State, data_dir: Path, now: datetime, report: dict | None, push: bool,
+             tracker: Tracker | None = None, stats: RunStats | None = None, reports: dict[str, str] | None = None,
+             message: str | None = None) -> None:
+    """Write state, tracker, stats, reports and feeds, then commit and push the data repo.
+
+    ``report`` (runs/last_run.json) is None for runs that only synced the tracker.
+    """
     from .feeds import write_feeds
+
+    data_dir = Path(data_dir)
 
     def write() -> None:
         state.save()
-        write_feeds(config, state, data_dir, now, {g: v.get("last_run") for g, v in state.runs["groups"].items()})
-        runs = Path(data_dir) / "runs"
+        if tracker is not None:
+            tracker.save(now)
+        runs = data_dir / "runs"
         runs.mkdir(parents=True, exist_ok=True)
-        (runs / "last_run.json").write_text(json.dumps(report, ensure_ascii=False, indent=1) + "\n", "utf-8")
+        if stats is not None and not stats.empty:
+            stats.merge_into(data_dir, now.astimezone(config.tz).date())  # reads what is on disk: see stats.py
+        for rel, text in (reports or {}).items():
+            path = data_dir / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
+        write_feeds(config, state, data_dir, now, {g: v.get("last_run") for g, v in state.runs["groups"].items()},
+                    tracker)
+        if report is not None:
+            (runs / "last_run.json").write_text(json.dumps(report, ensure_ascii=False, indent=1) + "\n", "utf-8")
         err = runs / "config_error.txt"
         if err.exists():
             err.unlink()
 
     def rewrite() -> None:
         state.merge_with_disk()
+        if tracker is not None:
+            tracker.merge_with_disk(now)
         write()
 
     write()
-    commit_and_push(Path(data_dir), f"jobfinder: run {iso(now)}", push=push, rewrite=rewrite)
+    commit_and_push(data_dir, message or f"jobfinder: run {iso(now)}", push=push, rewrite=rewrite)
+
+
+async def tracker_sync(config_path: str | None, data_dir: Path, push: bool = True, now: datetime | None = None) -> int:
+    """Read tracker buttons and commands from Telegram and save them (cron-job.org, every 1–3 h)."""
+    from .tracker.sync import sync
+
+    config = load_or_report(config_path, data_dir, push)
+    tracker = open_tracker(config, data_dir)
+    if tracker is None:
+        log.info("tracker: disabled (needs tracker.enabled and notify.telegram.enabled)")
+        return 0
+    state = State(data_dir)
+    now = now or now_utc()
+    async with Http(config.http) as http:
+        result = await sync(config, http, tracker, state, now)
+    if tracker.changed:
+        _persist(config, state, data_dir, now, None, push, tracker=tracker,
+                 message=f"jobfinder: tracker sync {iso(now)}")
+    else:
+        log.info("tracker: nothing to save")
+    return 1 if result.failed else 0
 
 
 async def test_notify(config_path: str | None, data_dir: Path) -> int:
     config = load_or_report(config_path, data_dir, push=False)
     async with Http(config.http) as http:
-        n = Notification("test", "test", [], config.language, config.tz, now_utc(), test=True)
+        n = Notification("test", "test", [], config.language, config.tz, now_utc(), test=True,
+                         buttons=open_tracker(config, data_dir) is not None)
         attempted, succeeded = await send_all(config, http, n)
     log.info(f"test notification: {succeeded}/{attempted} channels OK")
     if attempted == 0:

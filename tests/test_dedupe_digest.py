@@ -101,7 +101,7 @@ SOURCES = """
 
 
 def texts() -> list[str]:
-    return [json.loads(c.request.content)["text"] for c in respx.calls if "api.telegram.org" in str(c.request.url)]
+    return [json.loads(c.request.content)["text"] for c in respx.calls if str(c.request.url).endswith("/sendMessage")]
 
 
 @respx.mock

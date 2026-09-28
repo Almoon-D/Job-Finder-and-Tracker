@@ -182,12 +182,17 @@ class State:
             entry["also_on"].append(name)
             self.material = True
 
-    def mark_notified(self, job: Job, group: str, now: datetime) -> None:
+    def mark_notified(self, job: Job, group: str, now: datetime, dup_of: str | None = None) -> None:
+        """``dup_of``: key of the job that was actually sent (this one was folded into it)."""
         entry = self.seen.setdefault(job.key, {"first_seen": iso(now), "notified": {}})
         entry.setdefault("notified", {})[group] = iso(now)
         self.material = True
         entry["fp"] = job.fingerprint
         entry.setdefault("url", job.url)
+        if job.family:
+            entry["family"] = job.family
+        if dup_of:
+            entry["dup_of"] = dup_of
         if self._index is not None:
             self._add_to_index(job.key, entry)
         if job.score is not None:

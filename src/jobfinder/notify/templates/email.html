@@ -16,7 +16,12 @@
         {% endfor %}
       </div>
     {% endmacro %}
-    {% if n.format == "grouped" %}
+    {% if n.report %}
+      {% for heading, lines in n.report.sections %}
+        <h3 style="margin:18px 0 4px 0;font-size:15px;color:#111827">{{ heading }}</h3>
+        {% for line in lines %}<div style="font-size:13px;color:#374151;margin-top:2px">{{ line }}</div>{% endfor %}
+      {% endfor %}
+    {% elif n.format == "grouped" %}
       {% for heading, jobs in n.sections() %}
         <h3 style="margin:18px 0 4px 0;font-size:15px;color:#111827">{{ heading }}</h3>
         {% for job in jobs %}{{ job_block(job) }}{% endfor %}

@@ -13,6 +13,7 @@ from pathlib import Path
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from ..i18n import t
+from ..tracker.buttons import TEST_ID, job_id, keyboard
 from .base import Channel, ChannelError, Notification
 
 
@@ -38,6 +39,8 @@ def chunk(parts: list[str], limit: int, sep: str = "\n\n") -> list[str]:
 
 
 def footer_lines(n: Notification) -> list[str]:
+    if n.report is not None:
+        return list(n.report.footer)
     lines = [n.sources_line]
     if n.also_elsewhere:
         lines.insert(0, t(n.lang, "elsewhere", n=n.also_elsewhere))
@@ -73,13 +76,21 @@ class Telegram(Channel):
         link = f'🔗 <a href="{e(job.url, quote=True)}">{e(t(n.lang, "view"))}</a>'
         return f"{head}\n{meta}\n{link}"
 
-    async def _send(self, token: str, chat: str, text: str, silent: bool) -> None:
+    def _report_parts(self, n: Notification) -> list[str]:
+        e = html.escape
+        assert n.report is not None
+        return [f"<b>{e(heading)}</b>\n" + "\n".join(e(line) for line in lines) for heading, lines in n.report.sections]
+
+    async def _send(self, token: str, chat: str, text: str, silent: bool, markup: dict | None = None) -> dict:
+        """Send one message; returns Telegram's ``result`` (the sent message) or {}."""
         cfg = self.config.notify.telegram
-        await self.http.post_json(
-            f"https://api.telegram.org/bot{token}/sendMessage",
-            json={"chat_id": chat, "text": text, "parse_mode": "HTML",
-                  "disable_web_page_preview": cfg.disable_preview, "disable_notification": silent},
-        )
+        payload = {"chat_id": chat, "text": text, "parse_mode": "HTML",
+                   "disable_web_page_preview": cfg.disable_preview, "disable_notification": silent}
+        if markup:
+            payload["reply_markup"] = markup
+        data = await self.http.post_json(f"https://api.telegram.org/bot{token}/sendMessage", json=payload)
+        result = data.get("result") if isinstance(data, dict) else None
+        return result if isinstance(result, dict) else {}
 
     async def send(self, n: Notification) -> None:
         cfg = self.config.notify.telegram
@@ -90,13 +101,28 @@ class Telegram(Channel):
         footer = "\n".join(html.escape(x) for x in footer_lines(n))
         silent = n.empty and n.priority != "high"
         if n.test:
-            await self._send(token, chat, f"{header}\n{html.escape(t(n.lang, 'test_body'))}", False)
+            text, markup = f"{header}\n{html.escape(t(n.lang, 'test_body'))}", None
+            if n.buttons:  # the tracker's buttons, to try the whole loop (press → sync → marked)
+                text += f"\n\n{html.escape(t(n.lang, 'test_buttons'))}"
+                markup = keyboard(TEST_ID, None, n.lang)
+            await self._send(token, chat, text, False, markup)
+            return
+        if n.report is not None:
+            for i, text in enumerate(chunk([p for p in (header, *self._report_parts(n), footer) if p], self.LIMIT)):
+                if i:
+                    await asyncio.sleep(1.1)
+                await self._send(token, chat, text, False)
             return
         if n.format == "per_job" and not n.empty:
             await self._send(token, chat, header, False)
             for job in n.shown:
                 await asyncio.sleep(1.1)  # Telegram allows ~1 message/second per chat
-                await self._send(token, chat, self._job_html(n, job), False)
+                jid = job_id(job.key) if n.buttons and job.kind == "job" else None
+                markup = keyboard(jid, n.tracker_status.get(jid), n.lang) if jid else None
+                sent = await self._send(token, chat, self._job_html(n, job), False, markup)
+                if jid and sent.get("message_id"):
+                    sent_chat = str((sent.get("chat") or {}).get("id") or chat)
+                    n.sent.append((jid, job.key, sent_chat, int(sent["message_id"])))
             if n.hidden_count or n.problems:
                 await self._send(token, chat, footer, True)
             return
@@ -155,7 +181,10 @@ class Discord(Channel):
         if n.test:
             await self.http.request("POST", url, json={"content": f"**{n.title}**\n{t(n.lang, 'test_body')}"})
             return
-        if n.format == "grouped":
+        if n.report is not None:
+            embeds = [{"title": heading[:256], "description": ("\n".join(lines) or "—")[: self.DESCRIPTION],
+                       "color": color} for heading, lines in n.report.sections]
+        elif n.format == "grouped":
             embeds = self._grouped_embeds(n, color)
         else:
             embeds = [
@@ -196,7 +225,10 @@ class Email(Channel):
 
     def render(self, n: Notification) -> tuple[str, str]:
         text_parts = [n.title, ""]
-        if n.format == "grouped":
+        if n.report is not None:
+            for heading, lines in n.report.sections:
+                text_parts += [f"== {heading} ==", *lines, ""]
+        elif n.format == "grouped":
             for heading, jobs in n.sections():
                 text_parts += [f"== {heading} ==", ""]
                 for j in jobs:
@@ -274,6 +306,13 @@ class Ntfy(Channel):
         if n.test:
             await self._post(server, topic, n.title, t(n.lang, "test_body"), prio, None, token)
             return
+        if n.report is not None:
+            # The footer (where the full report is) goes first: long bodies are cut at ntfy's 4 KB limit.
+            lines = [*footer_lines(n), ""]
+            for heading, rows in n.report.sections:
+                lines += [f"**{heading}**", *[f"- {r}" for r in rows], ""]
+            await self._post(server, topic, n.title, "\n".join(lines), 3, None, token)
+            return
         if n.format == "per_job" and n.jobs and len(n.shown) <= 10:
             for j in n.shown:
                 await self._post(server, topic, n.job_heading(j), "\n".join(n.job_meta(j)), prio, j.url, token)
@@ -310,7 +349,10 @@ class AppriseChannel(Channel):
         for u in urls:
             app.add(u)
         body_lines = []
-        if n.format == "grouped":
+        if n.report is not None:
+            for heading, lines in n.report.sections:
+                body_lines += [f"### {heading}", *[f"- {line}" for line in lines], ""]
+        elif n.format == "grouped":
             for heading, jobs in n.sections():
                 body_lines += [f"### {heading}"] + [f"- [{j.title}]({j.url}) · {n.compact_meta(j)}" for j in jobs] + [""]
         else:
