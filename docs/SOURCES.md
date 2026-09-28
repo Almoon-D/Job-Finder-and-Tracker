@@ -44,7 +44,7 @@ Use `jobfinder detect <url>` to see which adapter handles a URL, and
 | Type | URL pattern | Notes |
 |---|---|---|
 | `workday` | `https://<tenant>.wdN.myworkdayjobs.com/<site>` | Picks the site's own location facets for your locations; relative dates ("Posted 3 Days Ago"). |
-| `oracle_hcm` | `https://<host>.oraclecloud.com/hcmUI/CandidateExperience/<lang>/sites/<site>` | Server-side country filter, sorted by posting date. |
+| `oracle_hcm` | `https://<host>.oraclecloud.<tld>/hcmUI/CandidateExperience/<lang>/sites/<site>` (`.com`, or a regional data centre such as `fa.ocs.oraclecloud.eu`) | Server-side country filter, sorted by posting date. |
 | `eightfold` | `https://<company>.eightfold.ai/careers` | PCSX API, falls back to `/api/apply/v2`. Add `?domain=company.com` if needed. |
 | `brassring` | `https://<host>/TGnewUI/Search/Home/Home?partnerid=<n>&siteid=<n>` | IBM/Infinite BrassRing Talent Gateway; newest first, stops at the age window. |
 | `successfactors` | `https://careerN.successfactors.eu/career?company=<id>` | Legacy XML listing. For RMK sites on a custom domain set `type: successfactors` and `url:` the site root. |

@@ -32,6 +32,8 @@ def ctx_for(tmp_path, **source_kwargs):
         ("https://wd3.myworkdaysite.com/recruiting/acme/Careers", ("workday", {"tenant": "acme", "site": "Careers"})),
         ("https://acme.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/requisitions",
          ("oracle_hcm", {"site": "CX_1"})),
+        ("https://acme.fa.ocs.oraclecloud.eu/hcmUI/CandidateExperience/en/sites/CX_1/jobs?mode=location",
+         ("oracle_hcm", {"host": "acme.fa.ocs.oraclecloud.eu", "site": "CX_1"})),
         ("https://acme.eightfold.ai/careers", ("eightfold", {"domain": "acme.com"})),
         ("https://boards.greenhouse.io/acme", ("greenhouse", {"board": "acme"})),
         ("https://jobs.lever.co/acme", ("lever", {"company": "acme"})),

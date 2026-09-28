@@ -100,6 +100,25 @@ async def test_first_run_notifies_dated_matches_only(tmp_path):
 
 
 @respx.mock
+async def test_group_state_is_saved_before_the_run_ends(tmp_path, monkeypatch):
+    """A run killed by the workflow timeout after a group notified must not forget what it sent."""
+    respx.post(url__startswith="https://api.telegram.org/").mock(return_value=httpx.Response(200, json={"ok": True}))
+    write_config(tmp_path)
+    commits: list[tuple[str, bool]] = []
+
+    def fake_commit(data_dir, message, push=True, rewrite=None, attempts=4):
+        seen = json.loads((data_dir / "state" / "seen.json").read_text())["jobs"]
+        commits.append((message, any(v.get("notified") for v in seen.values())))
+        return True
+
+    monkeypatch.setattr("jobfinder.app.commit_and_push", fake_commit)
+    await run(None, tmp_path, groups=["company_sites"], now=NOW)
+    assert len(commits) == 2  # after the group, and the final one of the run
+    assert commits[0][0].startswith("jobfinder: company_sites") and commits[0][1] is True
+    assert commits[1][0].startswith("jobfinder: run")
+
+
+@respx.mock
 async def test_favorite_then_digest_marked(tmp_path):
     respx.post(url__startswith="https://api.telegram.org/").mock(return_value=httpx.Response(200, json={"ok": True}))
     write_config(tmp_path, favorite=True)

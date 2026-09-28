@@ -192,6 +192,10 @@ async def run(
                     for dup in job.extra.get("duplicates", []):
                         state.mark_notified(dup, d.name, now, dup_of=job.key)
                 state.mark_group_run(d.name, now, d.slot)
+                if outcome.jobs:
+                    # A run cancelled by the workflow timeout must not forget what it already sent.
+                    _persist(config, state, data_dir, now, None, push, tracker=tracker,
+                             message=f"jobfinder: {d.name} {iso(now)}")
             else:
                 log.warn(f"group #{idx}: no channel delivered; will retry on the next run")
 

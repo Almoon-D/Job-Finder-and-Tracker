@@ -140,6 +140,8 @@ llm:
   enabled: true                  # without an API key it silently falls back to keywords
   min_score: 60
   batch_size: 15
+  max_provider_failures: 2       # a provider failing this many requests in a row is skipped for the rest of the run
+  max_seconds_per_run: 600       # AI time budget per run; after it, the remaining jobs use keyword rules
   providers:                     # any OpenAI-compatible API, tried in order (a 429 moves on at once)
     - name: gemini-flash
       base_url: https://generativelanguage.googleapis.com/v1beta/openai
