@@ -238,3 +238,105 @@ async def test_teamtailor_custom_domain(tmp_path):
     assert jobs[0].locations == ["Berlin, Germany"] and jobs[0].description == "Own the roadmap"
     assert jobs[0].posted_at.day == 25
     await ctx.http.aclose()
+
+
+@respx.mock
+async def test_jsonld_sitemap_cdata_and_loose_json(tmp_path):
+    respx.get("https://recruiter.example.test/sitemap.xml").mock(
+        return_value=httpx.Response(200, text=fixture_text("sitemap_cdata.xml")))
+    respx.get("https://recruiter.example.test/vacancy/wealth-planner_R7").mock(
+        return_value=httpx.Response(200, text=fixture_text("jsonld_loose.html")))
+    ctx = ctx_for(tmp_path, type="jsonld_sitemap", url="https://recruiter.example.test/sitemap.xml",
+                  url_pattern="/vacancy/")
+    jobs = await build_adapter(ctx).fetch()
+    assert [j.title for j in jobs] == ["Wealth Planner"]  # CDATA read, old URL skipped
+    assert jobs[0].description == "Advise families on succession"  # raw newline in the JSON string
+    assert jobs[0].locations == ["Lisbon, PT"] and jobs[0].posted_at.day == 25
+    await ctx.http.aclose()
+
+
+@respx.mock
+async def test_rss_cdata(tmp_path):
+    respx.get("https://recruiter.example.test/vacancies/feed/").mock(
+        return_value=httpx.Response(200, text=fixture_text("rss_cdata.xml")))
+    ctx = ctx_for(tmp_path, type="rss", url="https://recruiter.example.test/vacancies/feed/",
+                  location_regex="Location:\\s*([^<\\n]+)")
+    jobs = await build_adapter(ctx).fetch()
+    assert jobs[0].title == "Head of Product & Growth"
+    assert jobs[0].url == "https://recruiter.example.test/vacancies/head-of-product/"
+    assert jobs[0].locations == ["Lisbon"] and jobs[0].description == "Location: Lisbon Lead the product team"
+    await ctx.http.aclose()
+
+
+@respx.mock
+async def test_html_list_urls_404_and_date_regex(tmp_path, monkeypatch):
+    base = "https://recruiter.example.test/jobs"
+    listing = fixture_text("recruiter_list.html")
+    second = listing.replace("/job/101", "/job/103").replace("Product Manager", "UX Researcher")
+    respx.get(f"{base}/finance?page=0").mock(return_value=httpx.Response(200, text=listing))
+    respx.get(f"{base}/finance?page=1").mock(return_value=httpx.Response(404))  # past the last page
+    respx.get(f"{base}/ux-research?page=0").mock(return_value=httpx.Response(200, text=second))
+    respx.get(f"{base}/ux-research?page=1").mock(return_value=httpx.Response(404))
+    respx.get(f"{base}/nothing-here?page=0").mock(return_value=httpx.Response(404))  # search without results
+    ctx = ctx_for(tmp_path, type="html_list", urls=[f"{base}/finance?page={{page}}", f"{base}/{{query_slug}}?page={{page}}"],
+                  queries=["UX research", "nothing here"], item="li.job", title="h3 a", link="h3 a",
+                  location="p.meta", location_regex=r"·\s*(.+)$", date="p.meta", date_regex=r"(\d{2}/\d{2}/\d{4})",
+                  pagination={"start": 0, "max_pages": 3}, delay_seconds=2)
+    pauses = []
+
+    async def fake_sleep(seconds):
+        pauses.append(seconds)
+
+    monkeypatch.setattr("jobfinder.sources.generic.html_list.asyncio.sleep", fake_sleep)
+    jobs = await build_adapter(ctx).fetch()
+    assert [j.title for j in jobs] == ["Product Manager", "Data Analyst", "UX Researcher"]
+    assert pauses == [2] * 4  # between the 5 listing requests
+    assert jobs[0].url == "https://recruiter.example.test/job/101" and jobs[0].locations == ["Berlin, Germany"]
+    assert (jobs[0].posted_at.day, jobs[0].posted_at.month, jobs[0].posted_precision) == (25, 9, "date")
+    await ctx.http.aclose()
+
+
+@respx.mock
+async def test_html_list_404_on_first_page_fails(tmp_path):
+    from jobfinder.sources.http import HttpError
+
+    respx.get("https://recruiter.example.test/jobs").mock(return_value=httpx.Response(404))
+    ctx = ctx_for(tmp_path, type="html_list", url="https://recruiter.example.test/jobs", item="li.job")
+    with pytest.raises(HttpError):
+        await build_adapter(ctx).fetch()
+    await ctx.http.aclose()
+
+
+@respx.mock
+async def test_html_list_detail_jsonld(tmp_path):
+    listing = fixture_text("recruiter_list.html").replace("Published 25/09/2026 · Berlin, Germany", "")
+    respx.get("https://recruiter.example.test/jobs").mock(return_value=httpx.Response(200, text=listing))
+    respx.get("https://recruiter.example.test/job/101").mock(
+        return_value=httpx.Response(200, text=fixture_text("jsonld_loose.html")))
+    ctx = ctx_for(tmp_path, type="html_list", url="https://recruiter.example.test/jobs", item="li.job",
+                  title="h3 a", location="p.meta", detail={"jsonld": True})
+    adapter = build_adapter(ctx)
+    job = (await adapter.fetch())[0]
+    assert job.posted_at is None and job.locations == []
+    await adapter.enrich(job)
+    assert job.description == "Advise families on succession"
+    assert job.posted_at.day == 25 and job.posted_precision == "date"
+    assert job.locations == ["Lisbon, PT"]
+    await ctx.http.aclose()
+
+
+@respx.mock
+async def test_jsonld_sitemap_skips_a_failing_page(tmp_path):
+    sitemap = fixture_text("sitemap_cdata.xml").replace("2026-01-01", "2026-09-26")  # both URLs fresh
+    respx.get("https://recruiter.example.test/sitemap.xml").mock(return_value=httpx.Response(200, text=sitemap))
+    respx.get("https://recruiter.example.test/vacancy/wealth-planner_R7").mock(
+        return_value=httpx.Response(200, text=fixture_text("jsonld_loose.html")))
+    broken = respx.get("https://recruiter.example.test/vacancy/old-role_R1").mock(return_value=httpx.Response(404))
+    ctx = ctx_for(tmp_path, type="jsonld_sitemap", url="https://recruiter.example.test/sitemap.xml",
+                  url_pattern="/vacancy/")
+    assert [j.title for j in await build_adapter(ctx).fetch()] == ["Wealth Planner"]
+    respx.get("https://recruiter.example.test/vacancy/wealth-planner_R7").mock(return_value=httpx.Response(404))
+    with pytest.raises(Exception, match="HTTP 404"):  # every page failing is still an error
+        await build_adapter(ctx).fetch()
+    assert broken.called
+    await ctx.http.aclose()

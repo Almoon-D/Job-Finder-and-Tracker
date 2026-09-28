@@ -187,14 +187,14 @@ class Runner:
         return out
 
     async def _score(self, items: list[tuple[Job, Source, Adapter]], out: GroupOutcome) -> list[tuple[Job, Source]]:
-        use_ai = self.llm.available
-        default_kw = self.config.filters.require_keyword_match
-        if default_kw is None:
-            default_kw = not use_ai
-
+        ai_available = self.llm.available
         kept: list[tuple[Job, Source]] = []
         pending: list[tuple[Job, Source]] = []
         for job, source, _ in items:
+            use_ai = ai_available and source.use_ai
+            default_kw = self.config.filters.require_keyword_match
+            if default_kw is None:
+                default_kw = not use_ai
             if job.kind != "job":
                 kept.append((job, source))
                 continue

@@ -178,6 +178,27 @@ async def test_ai_scoring_and_cache(tmp_path, monkeypatch):
     assert ai.call_count == 1
 
 
+@respx.mock
+async def test_source_without_ai_uses_keywords(tmp_path, monkeypatch):
+    monkeypatch.setenv("FAKE_AI_KEY", "k")
+    respx.post(url__startswith="https://api.telegram.org/").mock(return_value=httpx.Response(200, json={"ok": True}))
+    ai = respx.post("https://ai.example.test/v1/chat/completions").mock(return_value=httpx.Response(500))
+    llm = """llm:
+  enabled: true
+  providers: [{name: fake, base_url: "https://ai.example.test/v1", model: m, api_key_env: FAKE_AI_KEY}]
+"""
+    jobs = [JOBS[0], {"id": "9", "title": "Account Manager", "locations": ["Berlin"],
+                      "posted": "2026-09-27T06:00:00+00:00"}]
+    write_config(tmp_path, jobs=jobs, llm=llm)
+    cfg = (tmp_path / "config.yaml").read_text().replace("    type: fake\n", "    type: fake\n    use_ai: false\n")
+    (tmp_path / "config.yaml").write_text(cfg)
+    await run(None, tmp_path, groups=["company_sites"], now=NOW)
+    assert ai.call_count == 0  # the source opted out of the AI
+    joined = "\n".join(telegram_texts())
+    assert "Product Manager DACH" in joined  # keyword match
+    assert "Account Manager" not in joined  # no keyword: dropped instead of sent to the AI
+
+
 BOARDS = """
   boards: {times: ["11:00"], every_days: 3, format: grouped}
 """

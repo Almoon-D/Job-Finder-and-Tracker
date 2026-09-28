@@ -15,7 +15,7 @@ from selectolax.parser import HTMLParser, Node
 from ...dates import parse_date
 from ...models import Job
 from ..base import Adapter, AdapterError, register
-from ..util import html_to_text
+from ..util import html_to_text, unwrap_cdata
 
 
 def _txt(node: Node, *tags: str) -> str:
@@ -34,7 +34,7 @@ class Rss(Adapter):
         url = self.params.get("url")
         if not url:
             raise AdapterError("rss needs 'url'")
-        xml = await self.http.get_text(url)
+        xml = unwrap_cdata(await self.http.get_text(url))
         # selectolax is an HTML parser: <link> is a void element there, so rename it first.
         xml = re.sub(r"<(/?)link\b", r"<\1jflink", xml)
         tree = HTMLParser(xml)

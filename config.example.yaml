@@ -116,6 +116,21 @@ sources:
     type: jsonld_sitemap
     url: https://recruiter.example.test/sitemap.xml
     url_pattern: "/jobs/"
+  # Recruiter with HTML listings: a sector page plus keyword searches (a 404 = no results)
+  - name: Example Search Firm
+    group: recruiters
+    type: html_list
+    urls:
+      - "https://search-firm.example.test/jobs/finance?sort=newest&page={page}"
+      - "https://search-firm.example.test/jobs/{query_slug}?sort=newest&page={page}"
+    queries: [product manager]
+    item: li.job
+    title: h3 a
+    link: h3 a
+    location: .job-location
+    pagination: {start: 0, max_pages: 2}
+    delay_seconds: 1             # robots.txt Crawl-delay
+    detail: {jsonld: true}       # description and date from the job page's JobPosting JSON-LD
 
 llm:
   enabled: true                  # without an API key it silently falls back to keywords
