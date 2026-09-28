@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import json
 import os
 import sys
 from pathlib import Path
@@ -18,25 +17,6 @@ def _common(p: argparse.ArgumentParser) -> None:
     p.add_argument("--data-dir", default=os.environ.get("JOBFINDER_DATA_DIR", "data"),
                    help="private data repository checkout (default: ./data)")
     p.add_argument("-v", "--verbose", action="store_true", help="print private details (ignored in CI)")
-
-
-def _load_secrets_json() -> None:
-    """GitHub Actions passes every repository secret as JSON in JOBFINDER_SECRETS (toJSON(secrets)).
-
-    This lets the config reference any env var name (e.g. a custom api_key_env)
-    without editing the workflow. Values already in the environment win.
-    """
-    raw = os.environ.pop("JOBFINDER_SECRETS", "")
-    if not raw:
-        return
-    try:
-        data = json.loads(raw)
-    except ValueError:
-        log.warn("JOBFINDER_SECRETS is not valid JSON; ignored")
-        return
-    for key, value in data.items():
-        if isinstance(value, str) and value and key != "github_token" and not os.environ.get(key):
-            os.environ[key] = value
 
 
 def _groups(value: str | None) -> list[str] | None:
@@ -91,7 +71,6 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--groups")
 
     args = parser.parse_args(argv)
-    _load_secrets_json()
     if getattr(args, "verbose", False):
         log.set_verbose(True)
     data_dir = Path(getattr(args, "data_dir", "data"))
