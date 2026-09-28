@@ -50,5 +50,31 @@ jobs:
 
       - name: Run favourites
         env:
-          JOBFINDER_SECRETS: ${{ toJSON(secrets) }}
+          # Secrets are listed one by one on purpose: GitHub flags workflows that serialise every
+          # secret at once as possibly malicious and refuses to run them.
+          # Using another name in config.yaml (e.g. api_key_env: MY_KEY)? Add a line here too.
+          TELEGRAM_BOT_TOKEN:     ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:       ${{ secrets.TELEGRAM_CHAT_ID }}
+          SMTP_HOST:              ${{ secrets.SMTP_HOST }}
+          SMTP_PORT:              ${{ secrets.SMTP_PORT }}
+          SMTP_USER:              ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD:          ${{ secrets.SMTP_PASSWORD }}
+          EMAIL_TO:               ${{ secrets.EMAIL_TO }}
+          DISCORD_WEBHOOK_URL:    ${{ secrets.DISCORD_WEBHOOK_URL }}
+          NTFY_TOPIC:             ${{ secrets.NTFY_TOPIC }}
+          NTFY_TOKEN:             ${{ secrets.NTFY_TOKEN }}
+          APPRISE_URLS:           ${{ secrets.APPRISE_URLS }}
+          GEMINI_API_KEY:         ${{ secrets.GEMINI_API_KEY }}
+          GROQ_API_KEY:           ${{ secrets.GROQ_API_KEY }}
+          NVIDIA_API_KEY:         ${{ secrets.NVIDIA_API_KEY }}
+          OPENROUTER_API_KEY:     ${{ secrets.OPENROUTER_API_KEY }}
+          CEREBRAS_API_KEY:       ${{ secrets.CEREBRAS_API_KEY }}
+          MISTRAL_API_KEY:        ${{ secrets.MISTRAL_API_KEY }}
+          IMAP_HOST:              ${{ secrets.IMAP_HOST }}
+          IMAP_USER:              ${{ secrets.IMAP_USER }}
+          IMAP_PASSWORD:          ${{ secrets.IMAP_PASSWORD }}
+          INFOJOBS_CLIENT_ID:     ${{ secrets.INFOJOBS_CLIENT_ID }}
+          INFOJOBS_CLIENT_SECRET: ${{ secrets.INFOJOBS_CLIENT_SECRET }}
+          ADZUNA_APP_ID:          ${{ secrets.ADZUNA_APP_ID }}
+          ADZUNA_APP_KEY:         ${{ secrets.ADZUNA_APP_KEY }}
         run: uv run --no-sync jobfinder run --data-dir data --groups favorites

@@ -57,10 +57,14 @@ Repo público → **Settings → Secrets and variables → Actions**:
 | `DISCORD_WEBHOOK_URL` | Discord |
 | `NTFY_TOPIC` (y `NTFY_TOKEN` si tu servidor lo pide) | ntfy |
 | `APPRISE_URLS` | Otros servicios vía Apprise (Slack, Gotify, Pushover…), separados por espacios |
-| `GEMINI_API_KEY`, `GROQ_API_KEY`… | IA opcional |
+| `GEMINI_API_KEY`, `NVIDIA_API_KEY`, `GROQ_API_KEY` (también `OPENROUTER_API_KEY`, `CEREBRAS_API_KEY`, `MISTRAL_API_KEY`) | IA opcional |
 
-El workflow pasa todos los secrets al programa. Si en `config.yaml` usas otro nombre de
-variable (por ejemplo `api_key_env: MI_CLAVE`), basta con crear un secret con ese nombre.
+Los workflows pasan al programa **solo** los secrets de esta tabla, uno a uno (bloque `env:` del
+paso *Run* en `.github/workflows/jobfinder.yml` y `favorites.yml`). No se pasan todos de golpe a
+propósito: GitHub marca como «posiblemente malicioso» un workflow que vuelca todos los secrets y no
+lo ejecuta. Si en `config.yaml` usas otro nombre de variable (por ejemplo `api_key_env: MI_CLAVE`),
+crea el secret **y** añade una línea `MI_CLAVE: ${{ secrets.MI_CLAVE }}` en ese bloque de los dos
+workflows.
 
 ## 5. Canales de notificación
 
@@ -124,26 +128,38 @@ Pestaña **Actions → jobfinder → Run workflow**:
 ## 8. Puntualidad: disparador externo (cron-job.org)
 
 El cron de GitHub se retrasa a menudo entre 15 minutos y más de 2 horas, y a veces se salta
-ejecuciones. Para que los avisos lleguen a su hora y las favoritas se revisen cada 10 minutos:
+ejecuciones. Para que los avisos lleguen a su hora y las favoritas se revisen cada 10 minutos, un
+servicio externo gratuito «llama» a GitHub a la hora exacta.
 
 1. Crea un segundo token fine-grained (**PAT #2**): *Only select repositories* → tu repo
    **público**; **Permissions → Actions: Read and write**. No le des ningún otro permiso.
+   Copia el token al crearlo (GitHub no vuelve a mostrarlo).
+   > **Dónde va el PAT #2:** en **cron-job.org**, no en GitHub. No lo guardes como secret: se pega
+   > en la cabecera `Authorization` de cada cronjob (paso 2), después de la palabra `Bearer` y un
+   > espacio. Es lo que autoriza a cron-job.org a lanzar tus workflows.
 2. Crea una cuenta gratuita en <https://cron-job.org> → **Create cronjob**:
    - **URL**: `https://api.github.com/repos/TU-USUARIO/TU-REPO-PUBLICO/actions/workflows/jobfinder.yml/dispatches`
    - **Schedule**: personalizado, zona horaria *Europe/Madrid*: 09:00, 11:00 y 20:30. Si la
      interfaz no admite horas distintas en un mismo trabajo, crea dos.
    - **Advanced → Request method**: `POST`
-   - **Headers**:
-     - `Accept: application/vnd.github+json`
-     - `Authorization: Bearer <PAT #2>`
-     - `X-GitHub-Api-Version: 2022-11-28`
-   - **Request body**: `{"ref":"main","inputs":{"mode":"run"}}`
-   - La respuesta correcta es **204**.
-3. Crea otro cronjob igual para las **favoritas**, cada 10 minutos:
+   - **Advanced → Headers** (tres cabeceras):
+
+     | Key | Value |
+     |---|---|
+     | `Accept` | `application/vnd.github+json` |
+     | `Authorization` | `Bearer github_pat_…` ← aquí pegas el PAT #2 |
+     | `X-GitHub-Api-Version` | `2022-11-28` |
+   - **Advanced → Request body**: `{"ref":"main","inputs":{"mode":"run"}}`
+   - Pulsa **Test run**: la respuesta correcta es **204**. Un 401 significa token mal pegado o
+     caducado; un 404, URL o permiso *Actions* incorrectos.
+3. Crea otro cronjob igual (mismas tres cabeceras, mismo PAT #2) para las **favoritas**, cada 10
+   minutos:
    - URL: `.../actions/workflows/favorites.yml/dispatches`
    - Body: `{"ref":"main"}`
 4. No hace falta quitar los cron de GitHub: quedan de respaldo. La ejecución es
    **idempotente**, así que nunca recibirás un aviso duplicado aunque se disparen ambos.
+5. Cuando caduque el PAT #2, crea otro y sustitúyelo en la cabecera `Authorization` de los dos
+   cronjobs.
 
 Los horarios reales de cada grupo se definen en `groups:` de tu `config.yaml`. Los cron de
 los workflows y de cron-job.org solo «despiertan» el sistema. Si cambias los horarios en la
