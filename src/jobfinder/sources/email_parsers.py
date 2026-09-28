@@ -8,6 +8,7 @@ the title and the following lines of the same block are the company and the loca
 
 from __future__ import annotations
 
+import html
 import re
 from dataclasses import dataclass, field
 from urllib.parse import parse_qsl, unquote, urlencode, urlsplit, urlunsplit
@@ -97,10 +98,38 @@ def strip_tracking(url: str) -> str:
     return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), ""))
 
 
-def links(html: str) -> list[tuple[str, str, Node]]:
-    """(href, text, node) of every link in an HTML e-mail, in order."""
+_BARE_URL = re.compile(r"https?://[^\s<>\"')]+")
+
+
+def _plain_to_html(text: str) -> str:
+    """Plain-text alert -> one block per job: <div><a href=URL>first line</a><br>next lines...</div>.
+
+    Plain-text alerts usually list each job as a few lines (title, company, place) followed by its URL.
+    """
+    blocks, chunk = [], []
+    for raw in text.splitlines():
+        line = " ".join(raw.split())
+        urls = _BARE_URL.findall(line)
+        if urls:
+            title, rest = (chunk[0], chunk[1:]) if chunk else ("", [])
+            for url in urls:
+                blocks.append(f'<div><a href="{html.escape(url.rstrip(".,;"), quote=True)}">{html.escape(title)}</a>'
+                              + "".join(f"<br>{html.escape(x)}" for x in rest) + "</div>")
+            chunk = []
+        elif line:
+            chunk.append(line)
+    return "<html><body>" + "".join(blocks) + "</body></html>"
+
+
+def links(content: str) -> list[tuple[str, str, Node]]:
+    """(href, text, node) of every link in an e-mail, in order (plain-text e-mails: their bare URLs)."""
+    tree = HTMLParser(content)
+    anchors = tree.css("a[href]")
+    if not anchors and tree.body is not None and _BARE_URL.search(tree.body.text()):
+        tree = HTMLParser(_plain_to_html(tree.body.text(separator="\n")))
+        anchors = tree.css("a[href]")
     out = []
-    for a in HTMLParser(html).css("a[href]"):
+    for a in anchors:
         href = (a.attributes.get("href") or "").strip()
         if href.startswith(("http://", "https://")):
             out.append((href, " ".join(a.text(separator=" ").split()), a))

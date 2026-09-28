@@ -247,3 +247,39 @@ def test_opaque_links_keep_manager_titles():
     html = """<a href="https://t.example.test/a">Wealth Manager</a>
     <a href="https://t.example.test/b">Manage your job alerts</a>"""
     assert opaque_links(html, PARSERS["indeed"]) == [("https://t.example.test/a", "Wealth Manager")]
+
+
+def _plain(sender: str, body: str, date_header: str = "Sat, 26 Sep 2026 08:15:00 +0000", charset="utf-8") -> bytes:
+    return (f"From: {sender}\r\nTo: a@example.test\r\nSubject: Alert\r\nDate: {date_header}\r\n"
+            f"MIME-Version: 1.0\r\nContent-Type: text/plain; charset={charset}\r\n\r\n{body}").encode()
+
+
+async def test_malformed_email_does_not_block_the_mailbox(tmp_path, imap, monkeypatch):
+    original = email_alerts.message_parts
+
+    def flaky(raw):
+        if b"BROKEN" in raw:
+            raise LookupError("unknown encoding")
+        return original(raw)
+
+    monkeypatch.setattr(email_alerts, "message_parts", flaky)
+    imap.messages = {1: b"BROKEN", 2: (EMAILS / "linkedin.eml").read_bytes()}
+    _, ctx = ctx_for(tmp_path, parsers=["linkedin"])
+    jobs = await build_adapter(ctx).fetch()
+    assert len(jobs) == 2 and ctx.state.monitor(ctx.source.key)["last_uid"] == 2
+    await ctx.http.aclose()
+
+
+def test_naive_date_gets_utc():
+    raw = _plain("x@linkedin.com", "hi", date_header="Sat, 26 Sep 2026 08:15:00 -0000")
+    assert email_alerts.message_parts(raw)[3].tzinfo is not None
+
+
+async def test_plain_text_alert(tmp_path, imap):
+    body = "Senior Private Banker\r\nAcme Private Bank\r\nhttps://www.linkedin.com/comm/jobs/view/4000000009/?trk=x\r\n"
+    imap.messages = {1: _plain("jobalerts-noreply@linkedin.com", body)}
+    _, ctx = ctx_for(tmp_path, parsers=["linkedin"])
+    jobs = await build_adapter(ctx).fetch()
+    assert [(j.title, j.company, j.url) for j in jobs] == [
+        ("Senior Private Banker", "Acme Private Bank", "https://www.linkedin.com/jobs/view/4000000009/")]
+    await ctx.http.aclose()

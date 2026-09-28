@@ -25,7 +25,7 @@ import email.utils
 import imaplib
 import json
 import os
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from email.message import EmailMessage
 
 from pydantic import BaseModel
@@ -93,6 +93,8 @@ def message_parts(raw: bytes) -> tuple[str, str, str, datetime | None]:
         when = email.utils.parsedate_to_datetime(str(msg.get("Date", ""))) if msg.get("Date") else None
     except (TypeError, ValueError):
         when = None
+    if when is not None and when.tzinfo is None:  # "Date: ... -0000" parses as naive
+        when = when.replace(tzinfo=UTC)
     return sender, subject, content, when
 
 
@@ -140,21 +142,25 @@ class EmailAlerts(Adapter):
         ai_ready = self.ctx.llm is not None and self.ctx.llm.available
         self._redirects_left = int(self.params.get("resolve_redirects", 20))
         jobs: list[Job] = []
-        counts = {"known": 0, "unknown_ai": 0, "ignored": 0}
+        counts = {"known": 0, "unknown_ai": 0, "ignored": 0, "failed": 0}
         for uid, raw in messages:
-            sender, subject, html, when = message_parts(raw)
-            parser = parser_for(sender, enabled, overrides)
-            by_ai = unknown_mode == "ai" or any(p in sender.lower() for p in ai_senders)
-            if any(p in sender.lower() for p in excluded):
-                counts["ignored"] += 1
-            elif parser is not None:
-                counts["known"] += 1
-                jobs += await self._known(parser, html, when, uid)
-            elif by_ai and ai_ready:
-                counts["unknown_ai"] += 1
-                jobs += await self._with_ai(subject, html, when, uid)
-            else:
-                counts["ignored"] += 1
+            try:
+                sender, subject, html, when = message_parts(raw)
+                parser = parser_for(sender, enabled, overrides)
+                by_ai = unknown_mode == "ai" or any(p in sender.lower() for p in ai_senders)
+                if any(p in sender.lower() for p in excluded):
+                    counts["ignored"] += 1
+                elif parser is not None:
+                    jobs += await self._known(parser, html, when, uid)
+                    counts["known"] += 1
+                elif by_ai and ai_ready:
+                    jobs += await self._with_ai(subject, html, when, uid)
+                    counts["unknown_ai"] += 1
+                else:
+                    counts["ignored"] += 1
+            except Exception as exc:  # one malformed e-mail must not block the mailbox forever
+                counts["failed"] += 1
+                log.detail(f"email uid {uid}: {exc!r}")
         if messages:
             last = max(uid for uid, _ in messages)
             if memory.get("last_uid") != last or memory.get("uidvalidity") != validity:
@@ -164,7 +170,8 @@ class EmailAlerts(Adapter):
             memory.update(uidvalidity=validity, last_uid=0)
             self.ctx.state.material = True
         log.info(f"    email: {len(messages)} new messages ({counts['known']} known senders, "
-                 f"{counts['unknown_ai']} read by AI, {counts['ignored']} ignored), {len(jobs)} jobs")
+                 f"{counts['unknown_ai']} read by AI, {counts['ignored']} ignored, {counts['failed']} unreadable), "
+                 f"{len(jobs)} jobs")
         return list({j.key: j for j in jobs}.values())
 
     def _make_job(self, parser_name: str, job_id: str, title: str, url: str, company: str, location: str,
