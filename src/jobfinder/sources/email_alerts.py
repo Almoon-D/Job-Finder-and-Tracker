@@ -5,6 +5,8 @@
       group: boards
       parsers: [linkedin, indeed, infojobs, efinancialcareers, jobup]
       unknown: ignore            # or "ai": extract jobs from other senders with the configured AI
+      ai_senders: [recruiter.example]         # optional: these unknown senders are always read by the AI
+      exclude_senders: [recruiter.example]    # optional: never read these here (e.g. another source does)
       senders: {indeed: [alert@indeed.com]}   # optional: override the sender patterns of a parser
       mailbox: INBOX
 
@@ -133,16 +135,22 @@ class EmailAlerts(Adapter):
         enabled = list(self.params.get("parsers") or PARSERS)
         overrides = self.params.get("senders") or {}
         unknown_mode = str(self.params.get("unknown", "ignore")).lower()
+        ai_senders = [str(p).lower() for p in self.params.get("ai_senders") or []]
+        excluded = [str(p).lower() for p in self.params.get("exclude_senders") or []]
+        ai_ready = self.ctx.llm is not None and self.ctx.llm.available
         self._redirects_left = int(self.params.get("resolve_redirects", 20))
         jobs: list[Job] = []
         counts = {"known": 0, "unknown_ai": 0, "ignored": 0}
         for uid, raw in messages:
             sender, subject, html, when = message_parts(raw)
             parser = parser_for(sender, enabled, overrides)
-            if parser is not None:
+            by_ai = unknown_mode == "ai" or any(p in sender.lower() for p in ai_senders)
+            if any(p in sender.lower() for p in excluded):
+                counts["ignored"] += 1
+            elif parser is not None:
                 counts["known"] += 1
                 jobs += await self._known(parser, html, when, uid)
-            elif unknown_mode == "ai" and self.ctx.llm is not None and self.ctx.llm.available:
+            elif by_ai and ai_ready:
                 counts["unknown_ai"] += 1
                 jobs += await self._with_ai(subject, html, when, uid)
             else:

@@ -208,3 +208,11 @@ async def test_unknown_sender_with_ai_keeps_only_real_links(tmp_path, imap, monk
 
 def test_imap_date_is_locale_independent():
     assert email_alerts.imap_date(date(2026, 3, 5)) == "05-Mar-2026"
+
+
+async def test_sender_filters(tmp_path, imap):
+    imap.messages = {1: (EMAILS / "linkedin.eml").read_bytes(), 2: (EMAILS / "indeed.eml").read_bytes()}
+    _, ctx = ctx_for(tmp_path, parsers=["linkedin", "indeed"], exclude_senders=["indeed.com"])
+    jobs = await build_adapter(ctx).fetch()
+    assert {j.key.split(":")[1] for j in jobs} == {"linkedin"}
+    await ctx.http.aclose()

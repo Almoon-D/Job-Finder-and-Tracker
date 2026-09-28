@@ -163,3 +163,26 @@ async def test_only_queries_skips_full_listing(tmp_path):
     adapter = build_adapter(ctx)
     assert not adapter.full_listing and adapter.coverage_terms() == []
     await ctx.http.aclose()
+
+
+@respx.mock
+async def test_jobcloud_skips_blocked_searches(tmp_path):
+    responses = iter([httpx.Response(403), httpx.Response(200, text=fixture_text("jobcloud_search.json"))])
+    respx.get("https://www.jobs.ch/api/v1/public/search").mock(side_effect=lambda req: next(responses))
+    ctx = ctx_for(tmp_path, type="jobcloud", site="jobs.ch", queries=["private banker"], locations=["Geneva", "Lausanne"],
+                  use_coverage_search=False)
+    ctx.http.cfg.retries = 0
+    jobs = await build_adapter(ctx).fetch()
+    assert len(jobs) == 2  # the first search was blocked, the second one worked
+    await ctx.http.aclose()
+
+
+@respx.mock
+async def test_jobcloud_fails_when_every_search_is_blocked(tmp_path):
+    respx.get("https://www.jobs.ch/api/v1/public/search").mock(return_value=httpx.Response(403))
+    ctx = ctx_for(tmp_path, type="jobcloud", site="jobs.ch", queries=["private banker"], locations=["Geneva"],
+                  use_coverage_search=False)
+    ctx.http.cfg.retries = 0
+    with pytest.raises(Exception, match="every search was blocked"):
+        await build_adapter(ctx).fetch()
+    await ctx.http.aclose()

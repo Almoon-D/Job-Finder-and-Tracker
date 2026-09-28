@@ -16,6 +16,7 @@ so keep queries × places small.
 
 from __future__ import annotations
 
+import asyncio
 import math
 import os
 from typing import Any
@@ -28,6 +29,7 @@ from ..util import html_to_text, skip_without
 
 API = "https://api.adzuna.com/v1/api/jobs/{cc}/search/{page}"
 PAGE_SIZE = 50
+PAUSE = 2.5  # free keys allow about 25 requests per minute
 SUPPORTED = {"AT", "AU", "BE", "BR", "CA", "CH", "DE", "ES", "FR", "GB", "IN", "IT", "MX", "NL", "NZ", "PL",
              "SG", "US", "ZA"}
 
@@ -81,6 +83,7 @@ class Adzuna(Adapter):
                         if where:
                             params["where"] = where
                         data = await self.http.get_json(API.format(cc=cc.lower(), page=page), params=params)
+                        await asyncio.sleep(PAUSE)
                         results = data.get("results") or []
                         jobs += [j for j in map(self._to_job, results) if j]
                         if len(results) < PAGE_SIZE:

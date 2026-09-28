@@ -57,7 +57,10 @@ Repo público → **Settings → Secrets and variables → Actions**:
 | `DISCORD_WEBHOOK_URL` | Discord |
 | `NTFY_TOPIC` (y `NTFY_TOKEN` si tu servidor lo pide) | ntfy |
 | `APPRISE_URLS` | Otros servicios vía Apprise (Slack, Gotify, Pushover…), separados por espacios |
-| `GEMINI_API_KEY`, `NVIDIA_API_KEY`, `GROQ_API_KEY` (también `OPENROUTER_API_KEY`, `CEREBRAS_API_KEY`, `MISTRAL_API_KEY`) | IA opcional |
+| `GEMINI_API_KEY`, `NVIDIA_API_KEY`, `GROQ_API_KEY` (también `OPENROUTER_API_KEY`, `CEREBRAS_API_KEY`, `MISTRAL_API_KEY`) | IA opcional (§6) |
+| `IMAP_HOST`, `IMAP_USER`, `IMAP_PASSWORD` | Alertas por email (§13) |
+| `INFOJOBS_CLIENT_ID`, `INFOJOBS_CLIENT_SECRET` | InfoJobs, opcional (§12) |
+| `ADZUNA_APP_ID`, `ADZUNA_APP_KEY` | Adzuna, opcional (§12) |
 
 Los workflows pasan al programa **solo** los secrets de esta tabla, uno a uno (bloque `env:` del
 paso *Run* en `.github/workflows/jobfinder.yml` y `favorites.yml`). No se pasan todos de golpe a
@@ -100,16 +103,39 @@ config.
 
 La IA solo evalúa las ofertas que pasan los filtros baratos (ubicación, fecha, exclusiones)
 y añade a cada oferta una puntuación de encaje, los años de experiencia pedidos y una razón
-breve.
+breve. Los proveedores de `llm.providers` se prueban **en orden**: si uno agota su cuota
+(HTTP 429) o su clave falla, se pasa al siguiente al momento, sin reintentos, y no se le vuelve
+a llamar en esa ejecución. Si fallan todos, se usa el filtro por keywords.
 
-- **Gemini**: crea una clave en <https://aistudio.google.com/apikey> → secret `GEMINI_API_KEY`.
-  El modelo por defecto es `gemini-3.5-flash-lite`: su plan gratuito admite cientos de
-  peticiones al día y cada una evalúa unas 10 ofertas.
-- **Groq** (respaldo): crea una clave en <https://console.groq.com/keys> → secret `GROQ_API_KEY`.
-- Se puede usar cualquier API compatible con OpenAI (NVIDIA NIM, OpenRouter, Cerebras,
-  Mistral…); basta con añadirla en `llm.providers`.
+Orden recomendado (plan gratuito):
+
+1. **Gemini 3.8 Flash**: la mejor calidad, pero solo unas **20 peticiones al día**. Con
+   `batch_size: 15` son unas 300 ofertas/día.
+2. **NVIDIA NIM** (p. ej. `deepseek-ai/deepseek-v4.1-flash`): unas 40 peticiones por minuto y
+   sin tope diario conocido. Es el respaldo principal.
+3. **Gemini 3.5 Flash-Lite**: misma clave que el 1, cuota propia de unas 500 peticiones/día.
+4. **Groq** (`openai/gpt-oss-120b`): último respaldo.
+
+Los límites cambian: consulta los tuyos en <https://aistudio.google.com/rate-limit>.
+
+Claves (cada una es un secret del repo público):
+
+- **Gemini**: <https://aistudio.google.com/apikey> → `GEMINI_API_KEY` (vale para los modelos
+  Flash y Flash-Lite).
+- **NVIDIA**: <https://build.nvidia.com> → inicia sesión (cuenta gratuita de NVIDIA Developer,
+  pide verificar el teléfono) → *Get API Key* → `NVIDIA_API_KEY` (empieza por `nvapi-`).
+- **Groq**: <https://console.groq.com/keys> → `GROQ_API_KEY`.
+- Cualquier otra API compatible con OpenAI (OpenRouter, Cerebras, Mistral…) se añade en
+  `llm.providers`. Opciones extra del modelo van en `extra_body`, por ejemplo
+  `extra_body: {reasoning_effort: low}`.
+
+Comprueba que todo responde con **Actions → jobfinder → Run workflow → `mode: test-ai`**. El
+log solo muestra `provider #1 (gemini-flash): OK in 1.4s` o el código de error. Un `HTTP 404`
+suele indicar un nombre de modelo mal escrito, y un `HTTP 401`, una clave incorrecta.
+
 - Privacidad: los planes gratuitos pueden usar los datos para entrenar. Solo se envían
-  ofertas públicas y tu texto `profile`, así que mantenlo **anónimo**.
+  ofertas públicas, tu texto `profile` (mantenlo **anónimo**) y, si activas `unknown: ai`,
+  el texto de los emails de alerta de remitentes desconocidos (§13).
 - Sin ninguna clave, la herramienta funciona igual usando solo keywords.
 
 ## 7. Primeras ejecuciones
@@ -118,7 +144,8 @@ Pestaña **Actions → jobfinder → Run workflow**:
 
 1. `mode: validate` comprueba la config. Si hay errores, el log solo dice en qué campo
    están y el detalle completo queda en `runs/config_error.txt` del repo privado.
-2. `mode: test-notify` envía un mensaje de prueba a cada canal activo.
+2. `mode: test-notify` envía un mensaje de prueba a cada canal activo, y `mode: test-ai`
+   comprueba los proveedores de IA.
 3. `mode: run` con `force: true` hace una primera ejecución real.
    - En esa primera pasada, las ofertas **sin fecha** quedan como «línea base» y no se
      notifican, para no recibir una avalancha de golpe.
@@ -208,3 +235,60 @@ Ejemplos listos para Glance y Homepage llegarán en la sesión de dashboards.
   uv run jobfinder test-source "Nombre de la fuente" --config ruta/a/config.yaml --details
   uv run jobfinder dry-run --config ruta/a/config.yaml --data-dir /tmp/jf -v
   ```
+
+## 12. Portales de empleo (grupo `boards`)
+
+El grupo `boards` envía cada 3 días (11:00) un resumen **agrupado por familia de puesto y
+ubicación** (`format: grouped`). Solo entran las mejores `max_items`, por encaje y fecha; el
+resto queda en el feed. Una oferta que ya te llegó por otro grupo (por ejemplo desde la web de
+la empresa) no se repite: el pie lo indica con «🔁 N ya avisadas en otros grupos» y el feed la
+marca «También en …». Para decidir que dos ofertas son la misma se comparan la empresa y el
+título normalizados (sin «(m/f/d)», sin ciudades…) y la URL.
+
+| Portal | Qué hace falta |
+|---|---|
+| LinkedIn, eFinancialCareers, jobup.ch, jobs.ch, OCC, Computrabajo | Nada |
+| InfoJobs | Credenciales gratuitas de la API (abajo) |
+| Adzuna | Credenciales gratuitas de la API (abajo) |
+| Indeed | Sus alertas por email (§13): no tiene API pública |
+
+**InfoJobs** (opcional): entra en <https://developer.infojobs.net> con tu cuenta de InfoJobs →
+*Registrar aplicación* → copia el *Client ID* y el *Client Secret* → secrets
+`INFOJOBS_CLIENT_ID` e `INFOJOBS_CLIENT_SECRET`.
+
+**Adzuna** (opcional): regístrate en <https://developer.adzuna.com> → *Dashboard* → copia el
+*Application ID* y la *Application Key* → secrets `ADZUNA_APP_ID` y `ADZUNA_APP_KEY`.
+
+Mientras no existan esas claves, la fuente aparece como `skipped` en el log y no genera
+alertas de salud. Para probar una fuente concreta en Actions usa **`mode: test-source`** con el
+**número** de la fuente (el que aparece en los logs como `source #7`), no su nombre, que
+quedaría visible en el log público.
+
+## 13. Alertas por email (IMAP)
+
+Muchos portales (Indeed sobre todo) solo ofrecen alertas por email, y suelen ser más finas que
+cualquier búsqueda. La herramienta lee un buzón **dedicado** en modo solo lectura: nunca marca,
+mueve ni borra correos.
+
+1. Crea una cuenta de Gmail nueva, solo para esto (por ejemplo `tunombre.alertas@gmail.com`).
+2. Activa la **verificación en dos pasos** y crea una **contraseña de aplicación** en
+   <https://myaccount.google.com/apppasswords>.
+3. IMAP ya viene activado en Gmail; si no, en Gmail → Configuración → *Reenvío y correo
+   POP/IMAP* → *Habilitar IMAP*.
+4. Crea los secrets `IMAP_USER` (la dirección) e `IMAP_PASSWORD` (la contraseña de aplicación,
+   sin espacios). `IMAP_HOST` solo si no usas Gmail (por defecto `imap.gmail.com`).
+5. Crea las alertas **con esa dirección de email**:
+   - **LinkedIn**: busca empleos → *Crear alerta* (frecuencia diaria).
+   - **Indeed** (es/ch/mx): busca → *Recibir nuevos empleos por email*.
+   - **InfoJobs**: busca → *Crear alerta*.
+   - **eFinancialCareers**: busca → *Create job alert*.
+   - **jobup.ch / jobs.ch**: busca → *Créer une alerte*.
+   - **Michael Page**: busca → *Crear alerta*. Llega al grupo `recruiters`.
+   - Otros portales (Welcome to the Jungle…) también sirven con `unknown: ai`: sus emails
+     los lee la IA y solo se aceptan enlaces que aparecen en el propio email.
+6. En la config privada, las fuentes `type: email_alerts` deciden qué remitente va a cada
+   grupo (`parsers`, `ai_senders`, `exclude_senders`). Consulta `docs/SOURCES.md`.
+
+Cada email se procesa una sola vez (se guarda el último UID en `state/runs.json`). Solo se miran
+los emails de los últimos 4–5 días. Los logs públicos solo muestran conteos
+(`email: 12 new messages … 30 jobs`).

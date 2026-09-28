@@ -9,8 +9,10 @@
       max_pages: 2                   # 20 jobs per page, newest first
 
 Results are sorted by date; paging stops as soon as a page reaches jobs older than the
-group's age window. The API sits behind CloudFront, which blocks bursts, so requests are
-spaced out. Without ``queries`` it reads the whole listing of each place (can be large).
+group's age window. The API sits behind CloudFront, which blocks bursts (HTTP 403, cached for
+a while per URL), so requests are spaced out and a blocked search is skipped; the source only
+fails when every search is blocked. Without ``queries`` it reads the whole listing of each
+place (can be large).
 """
 
 from __future__ import annotations
@@ -19,14 +21,16 @@ import asyncio
 from datetime import timedelta
 from typing import Any
 
+from ... import log
 from ...dates import parse_date
 from ...models import Job
 from ..base import Adapter, AdapterError, register
 from ..generic.jsonld import job_postings
+from ..http import HttpError
 from ..util import html_to_text
 
 ROWS = 20  # API maximum
-PAUSE = 1.5
+PAUSE = 3.0
 SITES = ("jobup.ch", "jobs.ch")
 
 
@@ -83,12 +87,21 @@ class JobCloud(Adapter):
 
     async def fetch(self) -> list[Job]:
         pages = self.source.max_pages if "max_pages" in self.source.model_fields_set else 2
+        searches = [(q, place, pages) for place in self._places() for q in self.search_terms() or [""]]
+        searches += [(q, "", 1) for q in self.coverage_terms()]
         jobs: list[Job] = []
-        for place in self._places():
-            for q in self.search_terms() or [""]:
-                jobs += await self._search(q, place, pages)
-        for q in self.coverage_terms():
-            jobs += await self._search(q, "", 1)
+        blocked = 0
+        for query, place, n in searches:
+            try:
+                jobs += await self._search(query, place, n)
+            except HttpError as exc:
+                if exc.status not in (403, 429):
+                    raise
+                blocked += 1  # CloudFront burst protection: try the next search
+                log.detail(f"{self.site}: search blocked (HTTP {exc.status})")
+                await asyncio.sleep(PAUSE * 2)
+        if searches and blocked == len(searches):
+            raise AdapterError(f"{self.site}: every search was blocked (HTTP 403)")
         return list({j.key: j for j in jobs}.values())
 
     async def enrich(self, job: Job) -> None:

@@ -60,6 +60,8 @@ groups:
     times: ["11:00"]
     every_days: 3
     max_age_days: 3.5
+    format: grouped              # digest grouped by role family and location
+    max_items: 30                # the rest goes to the feed
   recruiters:                    # recruiters / headhunters, every 3 days
     times: ["11:00"]
     every_days: 3
@@ -87,12 +89,26 @@ sources:
     url: https://example-studio.test/careers
     link_pattern: "/careers/.+"
 
-  # LinkedIn public search (no login). Keep queries few; never in 'favorites'.
+  # LinkedIn public search (no login). Keep queries few (combine with OR); never in 'favorites'.
   - name: LinkedIn
     group: boards
     type: linkedin
-    queries: [product manager, product owner]
+    queries: ['"product manager" OR "product owner"']
     max_pages: 2
+
+  # Other boards (see docs/SOURCES.md): efinancialcareers, jobcloud (jobup.ch / jobs.ch),
+  # infojobs and adzuna (skipped until their API keys exist).
+  - name: Adzuna
+    group: boards
+    type: adzuna
+    queries: [product manager]
+
+  # Job-alert e-mails sent to a dedicated mailbox, read-only (IMAP_USER / IMAP_PASSWORD).
+  - name: Alert e-mails
+    group: boards
+    type: email_alerts
+    parsers: [linkedin, indeed]
+    unknown: ignore              # or "ai"
 
   # Recruiter with schema.org JobPosting pages listed in its sitemap
   - name: Example Recruiter
@@ -104,8 +120,17 @@ sources:
 llm:
   enabled: true                  # without an API key it silently falls back to keywords
   min_score: 60
-  providers:                     # any OpenAI-compatible API, tried in order
-    - name: gemini
+  batch_size: 15
+  providers:                     # any OpenAI-compatible API, tried in order (a 429 moves on at once)
+    - name: gemini-flash
+      base_url: https://generativelanguage.googleapis.com/v1beta/openai
+      model: gemini-3.8-flash
+      api_key_env: GEMINI_API_KEY
+    - name: nvidia
+      base_url: https://integrate.api.nvidia.com/v1
+      model: deepseek-ai/deepseek-v4.1-flash
+      api_key_env: NVIDIA_API_KEY
+    - name: gemini-lite
       base_url: https://generativelanguage.googleapis.com/v1beta/openai
       model: gemini-3.5-flash-lite
       api_key_env: GEMINI_API_KEY
