@@ -309,7 +309,7 @@ Recruiter sites rarely run a mainstream ATS. What usually works, by platform:
 | WordPress with a job post type | its feed (`/<jobs-path>/feed/`) with `rss`; `pubDate` may be a sync time |
 | Manatal career pages (`<slug>.careers-page.com`) | `html_list` on `?page={page}` (`article.job-card`); no dates |
 | Single-page app over a JSON API (Sitecore/Next.js search APIs, Supabase REST…) | `json_api` with the same request the page makes (a public `apikey` header if the page sends one) |
-| Bot protection (PerimeterX/HUMAN, Vercel checkpoint, Cloudflare challenge) | not reachable from GitHub Actions: create job alerts to your alerts mailbox and read them with `email_alerts` (`ai_senders`) |
+| Bot protection (PerimeterX/HUMAN, Vercel checkpoint, Cloudflare challenge) | not reachable from GitHub Actions: create job alerts to your alerts mailbox and read them with `email_alerts` (`ai_senders`); if the firm posts on LinkedIn, add a `linkedin` source in the recruiters group with its `company_ids` and no `queries` (one keyword-less search per location) |
 | Executive search firms that publish no mandates | nothing to watch: register your CV in their database |
 
 Check `robots.txt` first: do not read disallowed paths, honour `Crawl-delay` with `delay_seconds`,
