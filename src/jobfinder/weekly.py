@@ -20,10 +20,26 @@ from .tracker.store import STATUSES, Tracker, parse_status, status_label
 
 TOP_COMPANIES = 10
 TOP_SOURCES = 5
+MIN_MARKS = 5  # ✅/❌ answers needed before the acceptance table is shown
+POSITIVE = {"interested", "applied", "interview", "offer", "rejected"}  # you wanted it; "discarded" is the ❌
 SKIPPED_REASONS = {"already_notified", "baseline"}  # not decisions: the job was simply not new
 REASON_KEYS = {"location": "r_location", "too_old": "r_too_old", "excluded": "r_excluded",
                "experience": "r_experience", "no_keyword": "r_no_keyword", "ai_score": "r_ai_score",
+               "ai_unavailable": "r_ai_unavailable",
                "duplicate": "r_duplicate", "duplicate_previous": "r_duplicate", "duplicate_other_group": "r_duplicate"}
+
+
+def _feedback(tracker: Tracker, state: State, key: str) -> dict[str, list[int]]:
+    """{source or family: [wanted, discarded]} from the jobs you marked (only rows the tool sent)."""
+    out: dict[str, list[int]] = {}
+    for jid, status in tracker.statuses().items():
+        entry = state.seen.get(tracker.messages.get(jid, {}).get("key") or "")
+        if not entry:
+            continue
+        name = entry.get("src") if key == "src" else entry.get("family") or (entry.get("verdict") or {}).get("family")
+        if name:
+            out.setdefault(name, [0, 0])[0 if status in POSITIVE else 1] += 1
+    return out
 
 
 @dataclass
@@ -112,6 +128,13 @@ def build_weekly(config: Config, state: State, tracker: Tracker | None, data_dir
         if reasons:
             funnel_lines.append(f"{t(lang, 'w_discards')}: {_joined(reasons)}")
 
+    fb_source: dict[str, list[int]] = {}
+    fb_family: dict[str, list[int]] = {}
+    if tracker is not None:
+        fb_source, fb_family = _feedback(tracker, state, "src"), _feedback(tracker, state, "family")
+        if sum(sum(v) for v in fb_source.values()) < MIN_MARKS:
+            fb_source, fb_family = {}, {}
+
     # ---------------------------------------------------------------- tracker
     tracker_lines: list[str] = []
     counts: dict[str, int] = {}
@@ -131,6 +154,10 @@ def build_weekly(config: Config, state: State, tracker: Tracker | None, data_dir
                 tracker_lines.append(f"{t(lang, 'w_moves')}: " + " · ".join(f"+{n} {s}" for s, n in moves.items()))
             tracker_lines.append(f"{t(lang, 'pending_apply', n=len(to_apply))} · "
                                  f"{t(lang, 'pending_follow', n=len(follow), days=config.tracker.follow_up_days)}")
+            if fb_family:
+                labels = {f.name: f.label or f.name for f in config.role_families}
+                tracker_lines.append(f"{t(lang, 'w_accept')}: " + " · ".join(
+                    f"{labels.get(k, k)} {v[0]}/{sum(v)}" for k, v in sorted(fb_family.items())))
         else:
             tracker_lines.append(t(lang, "tracker_empty"))
 
@@ -176,6 +203,11 @@ def build_weekly(config: Config, state: State, tracker: Tracker | None, data_dir
                           for s in (*STATUSES, "other") if s in counts])
             md += [f"- {t(lang, 'pending_apply', n=len(to_apply))}",
                    f"- {t(lang, 'pending_follow', n=len(follow), days=config.tracker.follow_up_days)}", ""]
+            if fb_source:
+                src_names = {s.key: s.name for s in config.sources}
+                md += [f"### {t(lang, 'w_accept')}", ""] + _table(
+                    [t(lang, "w_col_source"), t(lang, "w_col_wanted"), t(lang, "w_col_discarded")],
+                    [[src_names.get(k, k), v[0], v[1]] for k, v in sorted(fb_source.items(), key=lambda kv: -sum(kv[1]))])
         else:
             md += [t(lang, "tracker_empty"), ""]
     md += [f"## {t(lang, 'w_sources')}", "", f"- {source_lines[0]}", ""]

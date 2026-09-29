@@ -3,8 +3,9 @@
 ``tracker/applications.csv`` – one row per job you marked (by button or by hand). Editable on
                                the GitHub website: unknown columns, row order and ``notes`` are
                                kept; changing ``status`` by hand is recorded in ``history``.
-``state/tracker.json``       – Telegram bookkeeping: the getUpdates offset and, for each job id,
-                               the messages that carry its buttons (to keep them in sync).
+``state/tracker.json``       – Bookkeeping: the Telegram getUpdates offset, for each job id the messages that
+                               carry its buttons or reactions (to keep them in sync), the layout of grouped
+                               digests (several jobs on one message) and the last Discord reactions seen.
 """
 
 from __future__ import annotations
@@ -52,6 +53,7 @@ _HEADER_ALIASES |= {"nota": "notes", "note": "notes", "position": "title", "role
                     "state": "status", "estatus": "status", "link": "url", "enlace": "url"}
 INFO_FIELDS = ("company", "title", "location", "url")
 REF_DAYS = 60
+DISCORD = "discord:"  # prefix of the "chat" of a Discord message in ``messages[jid]["refs"]``
 _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _MANUAL = "(manual)"
 
@@ -119,6 +121,8 @@ class Tracker:
     def _load(self) -> None:
         self.offset: int | None = None
         self.messages: dict[str, dict[str, Any]] = {}
+        self.layouts: dict[str, dict[str, Any]] = {}  # "chat:message id" -> {"jids", "start", "day"} of grouped digests
+        self.reactions: dict[str, str] = {}  # "channel:message id" -> reactions seen on Discord ("a", "d", "ad")
         self.rows: list[dict[str, str]] = []
         self.headers: dict[str, str] = {}  # field -> header as written in the file
         self.extra: list[str] = []  # columns added by hand, kept in their order
@@ -127,6 +131,8 @@ class Tracker:
             data = json.loads(self.state_path.read_text(encoding="utf-8"))
             self.offset = data.get("offset")
             self.messages = data.get("messages", {})
+            self.layouts = data.get("layouts", {})
+            self.reactions = data.get("reactions", {})
         if not self.csv_path.exists():
             return
         with self.csv_path.open(encoding="utf-8-sig", newline="") as fh:
@@ -172,13 +178,19 @@ class Tracker:
                 else:
                     del self.messages[jid]
             self.state_path.parent.mkdir(parents=True, exist_ok=True)
-            data = {"offset": self.offset, "messages": self.messages}
+            self.layouts = {k: v for k, v in self.layouts.items() if v.get("day", "") >= cutoff}
+            live = {f"{r[0].removeprefix(DISCORD)}:{r[1]}" for m in self.messages.values() for r in m["refs"]}
+            self.reactions = {k: v for k, v in self.reactions.items() if k in live}
+            data = {"offset": self.offset, "messages": self.messages, "layouts": self.layouts,
+                    "reactions": self.reactions}
             self.state_path.write_text(json.dumps(data, ensure_ascii=False, indent=1, sort_keys=True) + "\n", "utf-8")
 
     def merge_with_disk(self, now: datetime) -> None:
         """Reload the version on disk (pushed by a concurrent run or edited on the web) and re-apply ours."""
-        offset, messages = self.offset, self.messages
+        offset, messages, layouts, reactions = self.offset, self.messages, self.layouts, self.reactions
         self._load()
+        self.layouts = {**layouts, **self.layouts}
+        self.reactions = {**self.reactions, **reactions}
         if offset is not None and (self.offset is None or self.offset < offset):
             self.offset = offset
         for jid, mine in messages.items():
@@ -287,7 +299,28 @@ class Tracker:
             self._state_dirty = True
 
     def refs(self, jid: str) -> list[tuple[str, int]]:
-        return [(r[0], r[1]) for r in self.messages.get(jid, {}).get("refs", [])]
+        """Telegram messages that carry this job's buttons."""
+        return [(r[0], r[1]) for r in self.messages.get(jid, {}).get("refs", []) if not r[0].startswith(DISCORD)]
+
+    def remember_layout(self, chat: str, message_id: int, jids: list[str], start: int, day: str) -> None:
+        """A grouped digest message carries one ✅ ❌ row per job (numbered from ``start``)."""
+        self.layouts[f"{chat}:{int(message_id)}"] = {"jids": list(jids), "start": start, "day": day}
+        self._state_dirty = True
+
+    def layout(self, chat: str, message_id: int) -> dict[str, Any] | None:
+        return self.layouts.get(f"{chat}:{int(message_id)}")
+
+    def discord_refs(self, since: str) -> list[tuple[str, str, int]]:
+        """(job id, channel id, message id) of Discord messages sent on or after ``since`` (YYYY-MM-DD)."""
+        return [(jid, r[0].removeprefix(DISCORD), int(r[1]))
+                for jid, m in self.messages.items() for r in m.get("refs", [])
+                if r[0].startswith(DISCORD) and r[2] >= since]
+
+    def set_reactions(self, channel: str, message_id: int, seen: str) -> None:
+        key = f"{channel}:{message_id}"
+        if self.reactions.get(key, "") != seen:
+            self.reactions[key] = seen
+            self._state_dirty = True
 
     # ------------------------------------------------------------ queries
     def counts(self) -> dict[str, int]:
@@ -357,7 +390,8 @@ class Tracker:
 
 
 def open_tracker(config: Config, data_dir: Path) -> Tracker | None:
-    """The tracker, when it is enabled and Telegram (the only channel with buttons) is on."""
-    if not config.tracker.enabled or not config.notify.telegram.enabled:
+    """The tracker, when it is enabled and a channel that can carry answers is on: Telegram (buttons) or
+    a Discord bot (reactions)."""
+    if not config.tracker.enabled or not (config.notify.telegram.enabled or config.notify.discord.bot):
         return None
     return Tracker(data_dir, config.language, config.tz)

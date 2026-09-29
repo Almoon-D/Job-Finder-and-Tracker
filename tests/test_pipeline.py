@@ -357,3 +357,22 @@ async def test_failing_source_streak_persists_in_polling_runs(tmp_path):
         await run(None, tmp_path, groups=["favorites"], now=NOW + timedelta(minutes=10 * i))
     assert State(tmp_path).runs["sources"]["secret-corp"]["fail_streak"] == 3
     assert telegram_texts() == []  # polling groups never send health-only messages
+
+
+@respx.mock
+async def test_ai_outage_is_reported_as_its_own_reason(tmp_path, monkeypatch):
+    """Jobs the AI could not score (and without a keyword) are retried later, not counted as 'no keyword'."""
+    monkeypatch.setenv("FAKE_AI_KEY", "k")
+    respx.post(url__startswith="https://api.telegram.org/").mock(return_value=httpx.Response(200, json={"ok": True}))
+    respx.post("https://ai.example.test/v1/chat/completions").mock(return_value=httpx.Response(500))
+    llm = """llm:
+  enabled: true
+  providers: [{name: fake, base_url: "https://ai.example.test/v1", model: m, api_key_env: FAKE_AI_KEY}]
+"""
+    jobs = [JOBS[0], {"id": "9", "title": "Account Manager", "locations": ["Berlin"],
+                      "posted": "2026-09-27T06:00:00+00:00"}]
+    write_config(tmp_path, jobs=jobs, llm=llm)
+    await run(None, tmp_path, groups=["company_sites"], now=NOW)
+    rejected = json.loads((tmp_path / "runs" / "last_run.json").read_text())["groups"]["company_sites"]["rejected"]
+    assert rejected.get("ai_unavailable") == 1 and "no_keyword" not in rejected
+    assert "verdict" not in State(tmp_path).seen["secret-corp:9"]  # not cached: the next run tries again

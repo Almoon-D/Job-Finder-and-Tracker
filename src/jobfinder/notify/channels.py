@@ -9,11 +9,13 @@ import smtplib
 import ssl
 from email.message import EmailMessage
 from pathlib import Path
+from urllib.parse import quote
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
+from .. import log
 from ..i18n import t
-from ..tracker.buttons import TEST_ID, job_id, keyboard
+from ..tracker.buttons import GROUP_BUTTONS, GROUP_ROWS, TEST_ID, grouped_keyboard, job_id, keyboard
 from .base import Channel, ChannelError, Notification
 
 
@@ -68,6 +70,42 @@ class Telegram(Channel):
                 line = f'• <a href="{e(job.url, quote=True)}">{e(job.title[:150])}</a> — {e(n.compact_meta(job))}'
                 parts.append(f"\n<b>{e(heading)}</b>\n{line}" if i == 0 else line)
         return parts
+
+    def _numbered_parts(self, n: Notification) -> list[tuple[str, object, int]]:
+        """Grouped digest with buttons: (text, job, number). Only real jobs are numbered (they get a ✅ ❌ row)."""
+        e = html.escape
+        parts, number = [], 0
+        for heading, jobs in n.sections():
+            for i, job in enumerate(jobs):
+                mark = "•"
+                if job.kind == "job":
+                    number += 1
+                    mark = f"{number}."
+                line = f'{mark} <a href="{e(job.url, quote=True)}">{e(job.title[:150])}</a> — {e(n.compact_meta(job))}'
+                parts.append((f"\n<b>{e(heading)}</b>\n{line}" if i == 0 else line, job, number if job.kind == "job" else 0))
+        return parts
+
+    def _pack_numbered(self, head: str, parts: list[tuple[str, object, int]], foot: str) -> list[tuple[str, list]]:
+        """Messages of at most LIMIT characters and GROUP_ROWS button rows: [(text, [(job, number), ...])]."""
+        out: list[tuple[str, list]] = []
+        cur, jobs = head, []
+        for text, job, number in parts:
+            text = text[: self.LIMIT]
+            if len(cur) + 1 + len(text) > self.LIMIT or (number and len(jobs) >= GROUP_ROWS):
+                out.append((cur, jobs))
+                cur, jobs = text, []
+            else:
+                cur = f"{cur}\n{text}"
+            if number:
+                jobs.append((job, number))
+        if foot:
+            if len(cur) + 1 + len(foot) > self.LIMIT:
+                out.append((cur, jobs))
+                cur, jobs = foot, []
+            else:
+                cur = f"{cur}\n{foot}"
+        out.append((cur, jobs))
+        return out
 
     def _job_html(self, n: Notification, job) -> str:
         e = html.escape
@@ -126,6 +164,19 @@ class Telegram(Channel):
             if n.hidden_count or n.problems:
                 await self._send(token, chat, footer, True)
             return
+        if n.format == "grouped" and not n.empty and n.buttons and any(j.kind == "job" for j in n.shown):
+            head = f"{header}\n{html.escape(t(n.lang, 'btn_hint'))}"
+            for i, (text, jobs) in enumerate(self._pack_numbered(head, self._numbered_parts(n), f"\n{footer}")):
+                if i:
+                    await asyncio.sleep(1.1)
+                jids = [job_id(j.key) for j, _ in jobs]
+                markup = grouped_keyboard(jids, n.tracker_status, jobs[0][1]) if jobs else None
+                sent = await self._send(token, chat, text, silent, markup)
+                if markup and sent.get("message_id"):
+                    sent_chat, mid = str((sent.get("chat") or {}).get("id") or chat), int(sent["message_id"])
+                    n.layouts.append((sent_chat, mid, jids, jobs[0][1]))
+                    n.sent.extend((jid, j.key, sent_chat, mid) for jid, (j, _) in zip(jids, jobs, strict=True))
+            return
         if n.format == "grouped" and not n.empty:
             messages = chunk([header, *self._grouped_parts(n), f"\n{footer}"], self.LIMIT, sep="\n")
         else:
@@ -173,7 +224,60 @@ class Discord(Channel):
                 embeds.append({"title": heading[:256], "description": block, "color": color})
         return embeds
 
+    API = "https://discord.com/api/v10"
+    REACTIONS = tuple(icon for _, icon in GROUP_BUTTONS)
+
+    def _bot_credentials(self, n: Notification) -> tuple[str, str] | None:
+        """(token, channel id) when this alert should go out through the bot, with ✅ ❌ reactions."""
+        cfg = self.config.notify.discord
+        if not (cfg.bot and n.buttons and n.jobs and n.report is None and not n.test):
+            return None
+        token, channel = env(cfg.bot_token_env), env(cfg.channel_id_env)
+        if token and channel:
+            return token, channel
+        log.warn(f"notify/discord: missing {cfg.bot_token_env} or {cfg.channel_id_env}; sending the webhook digest")
+        return None
+
+    async def _bot(self, method: str, token: str, path: str, **kwargs):
+        return await self.http.request(method, f"{self.API}{path}", headers={"Authorization": f"Bot {token}"},
+                                       **kwargs)
+
+    async def _send_bot(self, n: Notification, token: str, channel: str, color: int) -> None:
+        """One message per job (an embed) with ✅ ❌ already added; the tracker reads the reactions."""
+        footer = "\n".join(footer_lines(n))[:2000]
+        await self._bot("POST", token, f"/channels/{channel}/messages",
+                        json={"content": f"**{n.title}**\n{t(n.lang, 'btn_hint')}"[:2000]})
+        if n.format == "grouped":
+            ordered = [(heading, j) for heading, jobs in n.sections() for j in jobs]
+        else:
+            ordered = [("", j) for j in n.shown]
+        for heading, job in ordered:
+            await asyncio.sleep(1.1)  # Discord allows 5 messages / 5 s per channel
+            embed = {"title": n.job_heading(job)[:256], "url": job.url,
+                     "description": "\n".join(n.job_meta(job))[:4000], "color": color}
+            if heading:
+                embed["author"] = {"name": heading[:256]}
+            resp = await self._bot("POST", token, f"/channels/{channel}/messages", json={"embeds": [embed]})
+            message = resp.json() if resp.content else {}
+            message_id = int(message["id"]) if str(message.get("id", "")).isdigit() else None
+            if message_id is None or job.kind != "job":
+                continue
+            n.sent.append((job_id(job.key), job.key, f"discord:{channel}", message_id))
+            for icon in self.REACTIONS:
+                try:
+                    await self._bot("PUT", token,
+                                    f"/channels/{channel}/messages/{message_id}/reactions/{quote(icon)}/@me")
+                except Exception as exc:  # the bot may lack Add Reactions: the message is still delivered
+                    log.detail(f"discord: reaction failed: {exc!r}")
+                await asyncio.sleep(0.3)
+        if footer:
+            await self._bot("POST", token, f"/channels/{channel}/messages", json={"content": footer})
+
     async def send(self, n: Notification) -> None:
+        bot = self._bot_credentials(n)
+        if bot:
+            await self._send_bot(n, *bot, 0xF5A623 if n.priority == "high" else 0x2F80ED)
+            return
         url = env(self.config.notify.discord.webhook_env)
         if not url:
             raise ChannelError(f"missing {self.config.notify.discord.webhook_env}")

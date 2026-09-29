@@ -8,6 +8,8 @@ from ..i18n import t
 
 PREFIX = "jf1"
 BUTTONS = ("interested", "applied", "interview", "discarded")  # 2×2 grid, in this order
+GROUP_BUTTONS = (("applied", "✅"), ("discarded", "❌"))  # grouped digests: one row per job, in this order
+GROUP_ROWS = 45  # Telegram allows 100 buttons per message; 2 per row
 TEST_ID = "test"  # buttons of the test-notify message: the sync edits them but saves nothing
 
 
@@ -42,3 +44,18 @@ def keyboard(jid: str, current: str | None, lang: str) -> dict:
         return {"text": label, "callback_data": callback_data(status, jid)}
 
     return {"inline_keyboard": [[button(BUTTONS[0]), button(BUTTONS[1])], [button(BUTTONS[2]), button(BUTTONS[3])]]}
+
+
+def grouped_keyboard(jids: list[str], statuses: dict[str, str], start: int = 1) -> dict:
+    """reply_markup of a grouped digest: one '3 ✅  3 ❌' row per numbered job; the current choice is '» 3 ✅ «'."""
+    rows = []
+    for offset, jid in enumerate(jids):
+        number = start + offset
+        row = []
+        for status, icon in GROUP_BUTTONS:
+            label = f"{number} {icon}"
+            if statuses.get(jid) == status:
+                label = f"» {label} «"
+            row.append({"text": label, "callback_data": callback_data(status, jid)})
+        rows.append(row)
+    return {"inline_keyboard": rows}
