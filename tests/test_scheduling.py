@@ -35,6 +35,25 @@ def test_grace_window(tmp_path):
     assert is_due("company_sites", g, state, datetime(2026, 9, 27, 10, 1, tzinfo=UTC), cfg.tz) is None
 
 
+def test_missed_morning_slot_is_caught_up_by_a_late_tick(tmp_path):
+    # GitHub's cron skipped every tick between 05:51 and 13:03 UTC: the 09:00 (07:00 UTC) slot must still
+    # run when the first tick arrives 6 h late, instead of being lost until the evening slot.
+    cfg = _cfg(company_sites={"times": ["09:00", "20:30"]})
+    g = cfg.groups["company_sites"]
+    assert g.grace_hours >= 12
+    state = State(tmp_path)
+    state.mark_group_run("company_sites", datetime(2026, 9, 28, 20, 40, tzinfo=UTC),
+                         datetime(2026, 9, 28, 18, 30, tzinfo=UTC))
+    late = datetime(2026, 9, 29, 13, 3, tzinfo=UTC)
+    # A short explicit grace still drops it
+    strict = _cfg(company_sites={"times": ["09:00", "20:30"], "grace_hours": 3}).groups["company_sites"]
+    assert is_due("company_sites", strict, state, late, cfg.tz) is None
+    due = is_due("company_sites", g, state, late, cfg.tz)
+    assert due and due.slot == datetime(2026, 9, 29, 7, 0, tzinfo=UTC)
+    state.mark_group_run("company_sites", late, due.slot)
+    assert is_due("company_sites", g, state, late + timedelta(hours=1), cfg.tz) is None  # not twice
+
+
 def test_dst_winter(tmp_path):
     cfg = _cfg(company_sites={"times": ["09:00"]})
     state = State(tmp_path)

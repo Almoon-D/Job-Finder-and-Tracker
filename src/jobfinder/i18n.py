@@ -89,6 +89,7 @@ MESSAGES = {
         "r_experience": "experiencia",
         "r_no_keyword": "sin keyword",
         "r_ai_score": "encaje IA bajo",
+        "r_source_family": "familia no permitida en la fuente",
         "r_duplicate": "duplicadas",
     },
     "en": {
@@ -172,6 +173,7 @@ MESSAGES = {
         "r_experience": "experience",
         "r_no_keyword": "no keyword",
         "r_ai_score": "low AI fit",
+        "r_source_family": "family not allowed for the source",
         "r_duplicate": "duplicates",
     },
 }

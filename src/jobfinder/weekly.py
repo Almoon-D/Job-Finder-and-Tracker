@@ -23,7 +23,7 @@ TOP_SOURCES = 5
 SKIPPED_REASONS = {"already_notified", "baseline"}  # not decisions: the job was simply not new
 REASON_KEYS = {"location": "r_location", "too_old": "r_too_old", "excluded": "r_excluded",
                "experience": "r_experience", "no_keyword": "r_no_keyword", "ai_score": "r_ai_score",
-               "duplicate": "r_duplicate", "duplicate_previous": "r_duplicate", "duplicate_other_group": "r_duplicate"}
+               "source_family": "r_source_family", "duplicate": "r_duplicate", "duplicate_previous": "r_duplicate", "duplicate_other_group": "r_duplicate"}
 
 
 @dataclass

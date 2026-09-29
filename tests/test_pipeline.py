@@ -220,6 +220,35 @@ async def test_ai_scoring_and_cache(tmp_path, monkeypatch):
 
 
 @respx.mock
+async def test_family_outside_the_source_list_is_reported_not_hidden_as_low_score(tmp_path, monkeypatch):
+    """A good score in a family the source does not allow (e.g. IR at a source limited to banking) is dropped
+    on purpose, but it must show up under its own reason and be listed for the owner."""
+    monkeypatch.setenv("FAKE_AI_KEY", "k")
+    respx.post(url__startswith="https://api.telegram.org/").mock(return_value=httpx.Response(200, json={"ok": True}))
+    answer = {"results": [{"id": "0", "score": 91, "family": "ux", "reason": "Investigacion UX"},
+                          {"id": "1", "score": 30, "family": None, "reason": "Retail"}]}
+    respx.post("https://ai.example.test/v1/chat/completions").mock(return_value=httpx.Response(
+        200, json={"choices": [{"message": {"content": json.dumps(answer)}}]}))
+    llm = """llm:
+  enabled: true
+  providers: [{name: fake, base_url: "https://ai.example.test/v1", model: m, api_key_env: FAKE_AI_KEY}]
+"""
+    jobs = [JOBS[0], {"id": "9", "title": "Account Manager", "locations": ["Berlin"],
+                      "posted": "2026-09-27T06:00:00+00:00"}]
+    write_config(tmp_path, jobs=jobs, llm=llm)
+    cfg = (tmp_path / "config.yaml").read_text().replace("    type: fake\n", "    type: fake\n    role_families: [product]\n")
+    (tmp_path / "config.yaml").write_text(cfg)
+    await run(None, tmp_path, groups=["company_sites"], now=NOW)
+    assert "Product Manager DACH" not in "\n".join(telegram_texts())
+    group = json.loads((tmp_path / "runs" / "last_run.json").read_text(encoding="utf-8"))["groups"]["company_sites"]
+    assert group["rejected"]["source_family"] == 1  # not counted as a low score
+    assert group["rejected"]["ai_score"] == 1  # the real low score still is
+    assert group["blocked_by_family"] == [{
+        "source": "Secret Corp", "company": "Secret Corp", "title": "Product Manager DACH", "family": "ux",
+        "score": 91, "url": group["blocked_by_family"][0]["url"]}]
+
+
+@respx.mock
 async def test_source_without_ai_uses_keywords(tmp_path, monkeypatch):
     monkeypatch.setenv("FAKE_AI_KEY", "k")
     respx.post(url__startswith="https://api.telegram.org/").mock(return_value=httpx.Response(200, json={"ok": True}))
@@ -342,6 +371,9 @@ async def test_shared_failing_source_counted_once(tmp_path):
 
 async def test_skip_polling_ignores_interval_groups(tmp_path):
     write_config(tmp_path, jobs=[], favorite=True)
+    cfg = (tmp_path / "config.yaml").read_text().replace(
+        'times: ["09:00", "20:30"], format: per_job}', 'times: ["09:00", "20:30"], format: per_job, grace_hours: 3}')
+    (tmp_path / "config.yaml").write_text(cfg)  # short grace: the 09:00 slot is too old at 19:30
     FakeAdapter.calls = 0
     await run(None, tmp_path, now=NOW + timedelta(hours=10), skip_polling=True)  # 19:30: nothing scheduled
     assert FakeAdapter.calls == 0

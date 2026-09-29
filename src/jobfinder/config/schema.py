@@ -97,7 +97,11 @@ class Group(_Model):
     every_days: int = Field(1, ge=1)
     interval_minutes: int | None = Field(None, ge=5, description="Polling group (e.g. favourites every 10 min).")
     quiet_hours: str | None = Field(None, description="HH:MM-HH:MM local window with no polling.")
-    grace_hours: float = Field(3.0, gt=0, description="How late a missed scheduled slot may still run.")
+    grace_hours: float = Field(
+        12.0, gt=0,
+        description="How late a missed scheduled slot may still run. GitHub's cron can skip half a day, "
+                    "and a late run is harmless (seen jobs are never repeated), so keep it generous.",
+    )
     max_age_days: float = Field(3.0, gt=0, description="Only jobs posted (or first seen) within this window.")
     notify_empty: bool = True
     format: Literal["per_job", "digest", "grouped"] = Field(

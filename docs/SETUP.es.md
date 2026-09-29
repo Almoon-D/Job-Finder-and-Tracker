@@ -161,7 +161,10 @@ Pestaña **Actions → jobfinder → Run workflow**:
 ## 8. Puntualidad: disparador externo (cron-job.org)
 
 El cron de GitHub se retrasa a menudo entre 15 minutos y más de 2 horas, y a veces se salta
-ejecuciones. Para que los avisos lleguen a su hora y las favoritas se revisen cada 10 minutos, un
+ejecuciones (un día llegó a saltarse toda la mañana). Sin cron-job.org, un horario perdido se
+recupera en la siguiente comprobación horaria del workflow, hasta `grace_hours` (12 h por defecto)
+después de la hora prevista, pero los avisos llegan más tarde y las favoritas no se revisan cada 10
+minutos. Para que los avisos lleguen a su hora y las favoritas se revisen cada 10 minutos, un
 servicio externo gratuito «llama» a GitHub a la hora exacta.
 
 1. Crea un segundo token fine-grained (**PAT #2**): *Only select repositories* → tu repo

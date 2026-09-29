@@ -14,8 +14,10 @@ on:
       timezone: "Europe/Madrid"
     - cron: "0 18 * * 0"
       timezone: "Europe/Madrid"
-    # Safety tick: catches slots GitHub skipped or delayed (runs only what is due).
-    - cron: "17 */2 * * *"
+    # Safety tick: catches slots GitHub skipped or delayed (runs only what is due, ~15 s when nothing is).
+    # Hourly because GitHub drops many scheduled runs (about half of the 2-hourly ticks on a normal day);
+    # a missed slot still runs up to `grace_hours` (default 12) late.
+    - cron: "17 * * * *"
   workflow_dispatch:
     inputs:
       mode:
