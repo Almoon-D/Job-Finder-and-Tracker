@@ -231,6 +231,15 @@ class LocationMatcher:
     def match_location(self, loc: str) -> bool:
         return self.target_for(loc) is not None
 
+    def is_country_of_target(self, name: str) -> bool:
+        """A bare country name ('Switzerland') for a country where a configured city lies.
+
+        It matches no city, but jobs of the configured cities are inside it: a server-side facet with this
+        value returns a superset that is then narrowed by ``matches`` (a country facet is often the only one).
+        """
+        norm = normalize_text(name)
+        return any(norm in country_aliases().get(iso2, ()) for iso2 in self.countries())
+
     def target_label(self, locations: list[str]) -> str | None:
         """Display name of the configured place a job belongs to ('Geneva', 'España'...), if any."""
         for loc in locations:
