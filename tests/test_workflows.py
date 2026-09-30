@@ -69,3 +69,4 @@ def test_favorites_loop_is_opt_in_and_can_start_its_successor():
     assert script.lstrip().startswith('if [ "$LOOP" != "true" ]; then')
     # The loop refreshes the data checkout every poll and hands over to a new run at the end
     assert "reset -q --hard" in script and "gh workflow run favorites.yml" in script
+    assert "pull -q --rebase" in script  # unpushed state is rebased and pushed, never reset away

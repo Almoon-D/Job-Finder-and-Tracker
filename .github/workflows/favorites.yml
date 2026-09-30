@@ -93,8 +93,13 @@ jobs:
           end=$(( $(date +%s) + 19800 ))
           while :; do
             # Other workflows push state to the data repo meanwhile: start every poll from its latest version,
-            # or a stale copy would send alerts twice.
-            git -C data fetch -q origin && git -C data reset -q --hard '@{u}' || echo "::warning::could not refresh the data repository"
+            # or a stale copy would send alerts twice. A commit that could not be pushed is rebased, never dropped.
+            git -C data fetch -q origin || echo "::warning::could not refresh the data repository"
+            if [ -n "$(git -C data log '@{u}..HEAD' --oneline)" ]; then
+              git -C data pull -q --rebase -X theirs && git -C data push -q || echo "::warning::could not push pending state"
+            else
+              git -C data reset -q --hard '@{u}'
+            fi
             uv run --no-sync jobfinder run --data-dir data --groups favorites || echo "::warning::a favourites poll failed"
             now=$(date +%s)
             [ $(( now + 600 )) -ge "$end" ] && break

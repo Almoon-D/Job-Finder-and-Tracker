@@ -77,7 +77,7 @@ class FakeIMAP:
     validity = b"77"
     commands: list[tuple] = []
 
-    def __init__(self, host, port):
+    def __init__(self, host, port, timeout=None):
         FakeIMAP.commands.append(("connect", host, port))
 
     def __enter__(self):

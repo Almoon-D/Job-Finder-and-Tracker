@@ -147,6 +147,8 @@ class Group(_Model):
             raise ValueError("a group needs 'times' or 'interval_minutes'")
         if self.kind == "summary" and not self.times:
             raise ValueError("a summary group needs 'times' (e.g. times: ['18:00'] and weekdays: [sun])")
+        if self.interval_minutes and "notify_empty" not in self.model_fields_set:
+            self.notify_empty = False  # a polling group must not send "no news" every few minutes
         return self
 
     def weekday_numbers(self) -> set[int] | None:
