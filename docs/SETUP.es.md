@@ -192,6 +192,13 @@ servicio externo gratuito «llama» a GitHub a la hora exacta.
    minutos:
    - URL: `.../actions/workflows/favorites.yml/dispatches`
    - Body: `{"ref":"main"}`
+   > **¿Sin cron-job.org?** Alternativa dentro de GitHub, desactivada por defecto: crea la variable de
+   > repositorio `FAVORITES_LOOP` con el valor `true` (*Settings → Secrets and variables → Actions →
+   > Variables*) y lanza **favorites** una vez (*Run workflow*). Esa ejecución queda viva unas 5 h 30 min,
+   > revisa las favoritas cada 10 minutos y lanza ella misma la siguiente; el cron de 30 minutos la reinicia
+   > si la cadena se rompe. Para pararla, borra la variable y cancela la ejecución en curso. Ojo: mantiene
+   > un runner ocupado casi las 24 h, algo que GitHub puede no ver con buenos ojos en un repositorio público;
+   > cron-job.org es la opción más ligera.
 4. **Tracker (§14)**: crea un tercer cronjob igual (mismas tres cabeceras, mismo PAT #2) **cada 2
    horas**, las 24 h:
    - URL: `.../actions/workflows/jobfinder.yml/dispatches`
