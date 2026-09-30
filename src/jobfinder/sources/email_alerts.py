@@ -59,7 +59,7 @@ def read_mailbox(host: str, port: int, user: str, password: str, mailbox: str, s
                  known_validity: str | None, last_uid: int, limit: int = MAX_MESSAGES,
                  ) -> tuple[str, list[tuple[int, bytes]]]:
     """Return (UIDVALIDITY, [(uid, raw message)]) of new messages. Read-only: never changes the mailbox."""
-    with imaplib.IMAP4_SSL(host, port) as imap:
+    with imaplib.IMAP4_SSL(host, port, timeout=60) as imap:  # a stalled server must not hang the whole run
         imap.login(user, password)
         typ, _ = imap.select(mailbox, readonly=True)
         if typ != "OK":

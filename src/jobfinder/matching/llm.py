@@ -96,6 +96,8 @@ def parse_results(text: str) -> list[dict[str, Any]]:
         data = json.loads(m.group(0))
     if isinstance(data, list):
         return data
+    if not isinstance(data, dict):  # valid JSON but a scalar ("null", 42...): a bad reply, not a crash
+        raise ValueError("reply is not a JSON object")
     results = data.get("results")
     if not isinstance(results, list):
         raise ValueError("no 'results' list")

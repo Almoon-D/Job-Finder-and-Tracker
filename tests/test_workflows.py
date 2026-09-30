@@ -55,3 +55,18 @@ def test_tracker_sync_mode_has_its_own_queue():
     assert "tracker-sync" in data["concurrency"]["group"] and "main" in data["concurrency"]["group"]
     run_step = next(s for s in data["jobs"]["run"]["steps"] if s.get("name") == "Run")["run"]
     assert "tracker-sync) uv run --no-sync jobfinder tracker-sync --data-dir data" in run_step
+
+
+def test_favorites_loop_is_opt_in_and_can_start_its_successor():
+    data = yaml.safe_load((ROOT / ".github" / "workflows" / "favorites.yml").read_text(encoding="utf-8"))
+    assert data["permissions"]["actions"] == "write"  # `gh workflow run` starts the next run
+    job = data["jobs"]["run"]
+    assert "FAVORITES_LOOP" in job["timeout-minutes"]  # 10 minutes for a single run, 350 for the loop
+    step = next(s for s in job["steps"] if s.get("name") == "Run favourites")
+    assert step["env"]["LOOP"] == "${{ vars.FAVORITES_LOOP }}"
+    script = step["run"]
+    # Without the variable it is still one plain run
+    assert script.lstrip().startswith('if [ "$LOOP" != "true" ]; then')
+    # The loop refreshes the data checkout every poll and hands over to a new run at the end
+    assert "reset -q --hard" in script and "gh workflow run favorites.yml" in script
+    assert "pull -q --rebase" in script  # unpushed state is rebased and pushed, never reset away

@@ -28,6 +28,12 @@ with `queries: [investor relations]`, `only_queries: true`, `role_families: [ir]
 `require_keyword_match: true` only those searches run and only matching titles are kept. It is
 supported by `workday`, `oracle_hcm`, `successfactors` (RMK) and `eightfold`.
 
+`role_families` also limits the family the **AI** may assign: a job it scores well but files under a
+family not in the list (an investor-relations role at a source limited to banking families) is dropped
+on purpose. It is counted as `source_family` (not as a low score) in `runs/last_run.json`, which lists
+those jobs under `blocked_by_family`, and in the weekly summary. If you want a company's roles from more
+than one family, list them all.
+
 `use_ai: false` keeps a source out of the AI matcher: its jobs pass only if a role-family keyword
 is in the title (restrict `role_families` to unambiguous families to avoid noise). Use it for
 sites whose `robots.txt` opts out of AI use (`Content-Signal: ai-input=no`), or to save quota.

@@ -56,6 +56,7 @@ groups:
     times: ["09:00", "20:30"]
     max_age_days: 3
     format: per_job
+    # grace_hours: 12            # a slot GitHub skipped still runs up to this many hours late (default 12)
   boards:                        # job boards, every 3 days
     times: ["11:00"]
     every_days: 3

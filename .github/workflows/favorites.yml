@@ -1,6 +1,10 @@
 # Favourite companies: near real-time alerts.
 # Trigger it every 10 minutes from an external scheduler (cron-job.org → workflow_dispatch),
 # because GitHub's own cron can be hours late. The cron below is only a fallback.
+#
+# No external scheduler? Set the repository variable FAVORITES_LOOP=true: one run then stays alive for
+# about 5.5 h, polling every 10 minutes, and starts its own successor before it ends (the */30 cron below
+# restarts the chain if it ever breaks). Unset the variable to stop it. See docs/SETUP.es.md §8.
 name: favorites
 
 on:
@@ -10,6 +14,7 @@ on:
 
 permissions:
   contents: read
+  actions: write   # only used by the FAVORITES_LOOP mode, to start the next run with `gh workflow run`
 
 concurrency:
   group: jobfinder-favorites
@@ -19,7 +24,7 @@ jobs:
   run:
     if: vars.DATA_REPO != ''
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: ${{ vars.FAVORITES_LOOP == 'true' && 350 || 10 }}
     steps:
       - uses: actions/checkout@v5
 
@@ -77,4 +82,28 @@ jobs:
           INFOJOBS_CLIENT_SECRET: ${{ secrets.INFOJOBS_CLIENT_SECRET }}
           ADZUNA_APP_ID:          ${{ secrets.ADZUNA_APP_ID }}
           ADZUNA_APP_KEY:         ${{ secrets.ADZUNA_APP_KEY }}
-        run: uv run --no-sync jobfinder run --data-dir data --groups favorites
+          LOOP: ${{ vars.FAVORITES_LOOP }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$LOOP" != "true" ]; then
+            uv run --no-sync jobfinder run --data-dir data --groups favorites
+            exit
+          fi
+          # Loop mode: poll every 10 minutes for 5 h 30 min, then hand over to a fresh run.
+          end=$(( $(date +%s) + 19800 ))
+          while :; do
+            # Other workflows push state to the data repo meanwhile: start every poll from its latest version,
+            # or a stale copy would send alerts twice. A commit that could not be pushed is rebased, never dropped.
+            git -C data fetch -q origin || echo "::warning::could not refresh the data repository"
+            if [ -n "$(git -C data log '@{u}..HEAD' --oneline)" ]; then
+              git -C data pull -q --rebase -X theirs && git -C data push -q || echo "::warning::could not push pending state"
+            else
+              git -C data reset -q --hard '@{u}'
+            fi
+            uv run --no-sync jobfinder run --data-dir data --groups favorites || echo "::warning::a favourites poll failed"
+            now=$(date +%s)
+            [ $(( now + 600 )) -ge "$end" ] && break
+            sleep $(( 600 - now % 600 ))
+          done
+          gh workflow run favorites.yml --ref "$GITHUB_REF_NAME" \
+            || echo "::warning::could not start the next run; the */30 cron will"

@@ -47,7 +47,11 @@ looking for.
   first; without an API key everything still works on keywords only.
 - **Idempotent scheduling**: a run can be triggered by GitHub's cron, by an external
   scheduler such as cron-job.org, or manually, and a slot is never notified twice. This
-  matters because GitHub's cron can be hours late.
+  matters because GitHub's cron can be hours late or skip runs: a missed slot still runs up to
+  `grace_hours` (12 by default) late, and a safety tick checks every hour.
+- **Favourites without an external scheduler**: set the repository variable `FAVORITES_LOOP=true` and
+  the favourites workflow keeps itself alive, polling every 10 minutes (off by default;
+  see [docs/SETUP.es.md](docs/SETUP.es.md) §8).
 - **Health alerts** when a source fails repeatedly or suddenly returns nothing.
 - **Application tracker in Telegram**: every per-job alert has ⭐ Interested · ✅ Applied ·
   🗣 Interview · ❌ Discard buttons. Presses are saved in `tracker/applications.csv` in the private

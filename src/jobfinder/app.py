@@ -134,12 +134,17 @@ async def run(
                 f"ai-scored {outcome.scored_by_ai}, matches {len(outcome.jobs)}, "
                 f"sources ok {outcome.sources_ok}/{outcome.sources_total}"
             )
+            gated = outcome.rejected.get("source_family", 0)
+            if gated:  # count only: names stay in the private runs/last_run.json
+                log.info(f"group #{idx}: {gated} well-scored job(s) skipped by a source's role_families "
+                         f"(listed in runs/last_run.json)")
             run_report["groups"][d.name] = {
                 "fetched": outcome.fetched,
                 "candidates": outcome.candidates,
                 "matches": len(outcome.jobs),
                 "ai_scored": outcome.scored_by_ai,
                 "rejected": outcome.rejected,
+                "blocked_by_family": outcome.blocked,
                 "also_elsewhere": outcome.also_elsewhere,
                 "sources_ok": outcome.sources_ok,
                 "sources_total": outcome.sources_total,

@@ -170,7 +170,7 @@ class _Target:
 
     def matches(self, loc: str, norm: str, mentioned: set[str]) -> bool:
         if self.city_names:
-            return any(_contains(norm, n) for n in self.city_names) and (not mentioned or self.country in mentioned)
+            return any(_contains(norm, n) for n in self.city_names) and (not mentioned or self.country is None or self.country in mentioned)
         if self.country is None:
             return False
         if self.country in mentioned:

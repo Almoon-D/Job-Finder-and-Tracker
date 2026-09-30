@@ -97,7 +97,11 @@ class Group(_Model):
     every_days: int = Field(1, ge=1)
     interval_minutes: int | None = Field(None, ge=5, description="Polling group (e.g. favourites every 10 min).")
     quiet_hours: str | None = Field(None, description="HH:MM-HH:MM local window with no polling.")
-    grace_hours: float = Field(3.0, gt=0, description="How late a missed scheduled slot may still run.")
+    grace_hours: float = Field(
+        12.0, gt=0,
+        description="How late a missed scheduled slot may still run. GitHub's cron can skip half a day, "
+                    "and a late run is harmless (seen jobs are never repeated), so keep it generous.",
+    )
     max_age_days: float = Field(3.0, gt=0, description="Only jobs posted (or first seen) within this window.")
     notify_empty: bool = True
     format: Literal["per_job", "digest", "grouped"] = Field(
@@ -143,6 +147,8 @@ class Group(_Model):
             raise ValueError("a group needs 'times' or 'interval_minutes'")
         if self.kind == "summary" and not self.times:
             raise ValueError("a summary group needs 'times' (e.g. times: ['18:00'] and weekdays: [sun])")
+        if self.interval_minutes and "notify_empty" not in self.model_fields_set:
+            self.notify_empty = False  # a polling group must not send "no news" every few minutes
         return self
 
     def weekday_numbers(self) -> set[int] | None:

@@ -110,7 +110,7 @@ async def test_weekly_summary_is_sent_and_saved(tmp_path, monkeypatch):
     dc = respx.post("https://discord.example.test/hook").mock(return_value=httpx.Response(204))
     seed(tmp_path)
 
-    assert await run(None, tmp_path, now=SUNDAY_18) == 0
+    assert await run(None, tmp_path, groups=["weekly_summary"], now=SUNDAY_18) == 0
     text = "\n".join(json.loads(c.request.content)["text"] for c in tg.calls)
     assert "📊 Resumen semanal 2026-W39" in text
     assert "Ofertas nuevas: 3" in text
@@ -133,8 +133,8 @@ async def test_weekly_summary_is_sent_and_saved(tmp_path, monkeypatch):
 
     # Idempotent: the same slot is not sent twice; Monday is not a slot
     tg.reset()
-    await run(None, tmp_path, now=SUNDAY_18 + timedelta(minutes=40))
-    await run(None, tmp_path, now=SUNDAY_18 + timedelta(days=1))
+    await run(None, tmp_path, groups=["weekly_summary"], now=SUNDAY_18 + timedelta(minutes=40))
+    await run(None, tmp_path, groups=["weekly_summary"], now=SUNDAY_18 + timedelta(days=1))
     assert tg.call_count == 0
 
 
@@ -154,3 +154,12 @@ async def test_failed_summary_is_retried(tmp_path, monkeypatch):
     tg.mock(return_value=httpx.Response(200, json={"ok": True}))
     assert await run(None, tmp_path, groups=["weekly_summary"], now=SUNDAY_18 + timedelta(hours=1)) == 0
     assert (tmp_path / "reports" / "weekly" / "2026-W39.md").exists()
+
+
+def test_every_rejection_reason_has_a_label_in_both_languages():
+    from jobfinder.i18n import MESSAGES
+    from jobfinder.weekly import REASON_KEYS
+
+    assert "source_family" in REASON_KEYS
+    for lang in ("es", "en"):
+        assert all(key in MESSAGES[lang] for key in REASON_KEYS.values()), lang

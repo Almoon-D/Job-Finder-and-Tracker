@@ -161,7 +161,10 @@ Pestaña **Actions → jobfinder → Run workflow**:
 ## 8. Puntualidad: disparador externo (cron-job.org)
 
 El cron de GitHub se retrasa a menudo entre 15 minutos y más de 2 horas, y a veces se salta
-ejecuciones. Para que los avisos lleguen a su hora y las favoritas se revisen cada 10 minutos, un
+ejecuciones (un día llegó a saltarse toda la mañana). Sin cron-job.org, un horario perdido se
+recupera en la siguiente comprobación horaria del workflow, hasta `grace_hours` (12 h por defecto)
+después de la hora prevista, pero los avisos llegan más tarde y las favoritas no se revisan cada 10
+minutos. Para que los avisos lleguen a su hora y las favoritas se revisen cada 10 minutos, un
 servicio externo gratuito «llama» a GitHub a la hora exacta.
 
 1. Crea un segundo token fine-grained (**PAT #2**): *Only select repositories* → tu repo
@@ -189,6 +192,13 @@ servicio externo gratuito «llama» a GitHub a la hora exacta.
    minutos:
    - URL: `.../actions/workflows/favorites.yml/dispatches`
    - Body: `{"ref":"main"}`
+   > **¿Sin cron-job.org?** Alternativa dentro de GitHub, desactivada por defecto: crea la variable de
+   > repositorio `FAVORITES_LOOP` con el valor `true` (*Settings → Secrets and variables → Actions →
+   > Variables*) y lanza **favorites** una vez (*Run workflow*). Esa ejecución queda viva unas 5 h 30 min,
+   > revisa las favoritas cada 10 minutos y lanza ella misma la siguiente; el cron de 30 minutos la reinicia
+   > si la cadena se rompe. Para pararla, borra la variable y cancela la ejecución en curso. Ojo: mantiene
+   > un runner ocupado casi las 24 h, algo que GitHub puede no ver con buenos ojos en un repositorio público;
+   > cron-job.org es la opción más ligera.
 4. **Tracker (§14)**: crea un tercer cronjob igual (mismas tres cabeceras, mismo PAT #2) **cada 2
    horas**, las 24 h:
    - URL: `.../actions/workflows/jobfinder.yml/dispatches`

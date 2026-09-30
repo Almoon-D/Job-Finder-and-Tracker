@@ -181,3 +181,27 @@ def test_example_config_is_valid():
 )
 def test_iso_codes_in_locations(matcher, loc, expected):
     assert matcher.match_location(loc) is expected
+
+
+def test_city_without_country_matches_locations_that_name_a_country():
+    m = LocationMatcher([LocationSpec(city="Geneva")])
+    assert m.matches(["Geneva"])[0]
+    assert m.matches(["Geneva, Switzerland"])[0]
+    assert m.matches(["Geneva, CH"])[0]
+    assert not m.matches(["Zurich, Switzerland"])[0]
+
+
+@pytest.mark.parametrize("reply", ["null", "42", '"ok"', "true"])
+def test_ai_reply_that_is_not_an_object_is_a_bad_reply_not_a_crash(reply):
+    from jobfinder.matching.llm import parse_results
+
+    with pytest.raises(ValueError):
+        parse_results(reply)
+
+
+def test_polling_group_does_not_send_empty_notices_unless_asked():
+    cfg = make_config(groups={"favorites": {"interval_minutes": 10}, "boards": {"times": ["11:00"]},
+                              "fast": {"interval_minutes": 10, "notify_empty": True}})
+    assert cfg.groups["favorites"].notify_empty is False
+    assert cfg.groups["boards"].notify_empty is True
+    assert cfg.groups["fast"].notify_empty is True

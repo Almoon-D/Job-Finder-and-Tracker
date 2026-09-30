@@ -19,6 +19,7 @@ from .location import LocationMatcher
 from .rules import excluded, experience_out_of_range, extract_experience, family_by_keywords
 
 MAX_ENRICH_PER_GROUP = 60
+MAX_BLOCKED_LISTED = 25  # scored matches skipped by a source's role_families that are listed in last_run.json
 
 
 @dataclass
@@ -34,6 +35,8 @@ class GroupOutcome:
     scored_by_ai: int = 0
     rejected: dict[str, int] = field(default_factory=dict)
     also_elsewhere: int = 0  # matches already notified in another group (not repeated)
+    # Jobs the AI scored well but a source's `role_families` refused (private: written to last_run.json only)
+    blocked: list[dict] = field(default_factory=list)
     # Per source, counted once per run: {key: {"ok": bool, "jobs": n, "seconds": s, "matches": n}}
     source_stats: dict[str, dict] = field(default_factory=dict)
 
@@ -224,10 +227,8 @@ class Runner:
             cached = self.state.cached_verdict(job, self.criteria)
             if cached:
                 self._apply(job, cached)
-                if self._accept(job, source):
+                if self._accept(job, source, out):
                     kept.append((job, source))
-                else:
-                    out.reject("ai_score")
                 continue
             pending.append((job, source))
 
@@ -244,10 +245,8 @@ class Runner:
                     continue
                 self.state.store_verdict(job, self.criteria, v)
                 self._apply(job, v)
-                if self._accept(job, source):
+                if self._accept(job, source, out):
                     kept.append((job, source))
-                else:
-                    out.reject("ai_score")
         return kept
 
     @staticmethod
@@ -257,10 +256,23 @@ class Runner:
         job.reason = v.reason
         job.experience = v.experience or job.experience
 
-    def _accept(self, job: Job, source: Source) -> bool:
+    def _accept(self, job: Job, source: Source, out: GroupOutcome) -> bool:
+        """Apply the AI verdict; a refusal is counted under its real reason.
+
+        ``ai_score``: below ``min_score``. ``source_family``: scored well, but the AI put it in a role family
+        that this source's ``role_families`` does not allow (e.g. an IR job at a source limited to banking).
+        The second is a config choice that silently hides good jobs, so those are listed for the owner.
+        """
         if (job.score or 0) < self.config.llm.min_score:
+            out.reject("ai_score")
             return False
-        return not (source.role_families and job.family and job.family not in source.role_families)
+        if source.role_families and job.family and job.family not in source.role_families:
+            out.reject("source_family")
+            if len(out.blocked) < MAX_BLOCKED_LISTED:
+                out.blocked.append({"source": source.name, "company": job.company, "title": job.title,
+                                    "family": job.family, "score": job.score, "url": job.url})
+            return False
+        return True
 
     def _dedupe(self, items: list[tuple[Job, Source]], group: str, out: GroupOutcome) -> list[Job]:
         """Drop duplicates: within this run (fuzzy fingerprint or same URL), already sent in this group,
