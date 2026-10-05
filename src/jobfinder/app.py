@@ -11,6 +11,7 @@ from .config.loader import ConfigError, load_config
 from .config.schema import Config, Group, Source
 from .matching.pipeline import GroupOutcome, Runner
 from .notify.base import Notification
+from .notify.destinations import Destinations
 from .notify.dispatch import credentials_checklist, send_all
 from .scheduling import DueGroup, due_groups
 from .sources.http import Http
@@ -44,6 +45,16 @@ def load_or_report(config_path: str | None, data_dir: Path, push: bool) -> Confi
             commit_and_push(data_dir, "jobfinder: config error", push=push)
             log.info("full error written to runs/config_error.txt in the data repository")
         raise
+
+
+def _destinations(config: Config, http: Http, state: State, data_dir: Path, now: datetime, push: bool,
+                  tracker: Tracker | None = None) -> Destinations | None:
+    """The chats of ``notify.routing`` (None when it is not set up). A chat the bots create is committed at
+    once: a chat lost from the state would be created again."""
+    if not config.notify.routing.active:
+        return None
+    return Destinations(config, http, state,
+                        on_created=lambda: _checkpoint(config, state, data_dir, now, push, tracker, "chats"))
 
 
 def _problems(config: Config, state: State, sources: list[Source]) -> list[str]:
@@ -113,6 +124,8 @@ async def run(
             return 0
         log.info(f"groups due: {len(due)} ({', '.join('#' + str(group_names.index(d.name) + 1) for d in due)})")
         runner = Runner(config, state, http, now, bootstrap=bootstrap)
+        destinations = None if dry_run or bootstrap else _destinations(config, http, state, data_dir, now, push,
+                                                                       tracker)
         for d in due:
             group = config.groups[d.name]
             idx = group_names.index(d.name) + 1
@@ -120,7 +133,7 @@ async def run(
                 if bootstrap:
                     continue
                 code = await _run_summary(config, state, tracker, http, data_dir, now, d, idx, dry_run, stats,
-                                          reports)
+                                          reports, destinations)
                 run_report["groups"][d.name] = {"kind": "summary", "delivered": code == 0,
                                                 "reports": list(reports)}
                 exit_code = max(exit_code, code)
@@ -186,7 +199,7 @@ async def run(
             if not announced:
                 delivered = True
             else:
-                attempted, succeeded = await send_all(config, http, n)
+                attempted, succeeded = await send_all(config, http, n, destinations)
                 delivered = attempted == 0 or succeeded > 0
                 if attempted and not succeeded:
                     exit_code = 1
@@ -221,7 +234,7 @@ async def run(
 
 async def _run_summary(config: Config, state: State, tracker: Tracker | None, http: Http, data_dir: Path,
                        now: datetime, due: DueGroup, idx: int, dry_run: bool, stats: RunStats,
-                       reports: dict[str, str]) -> int:
+                       reports: dict[str, str], destinations: Destinations | None = None) -> int:
     """Build and send a weekly summary; its Markdown file is written when the run is persisted."""
     from .weekly import build_weekly
 
@@ -236,7 +249,7 @@ async def _run_summary(config: Config, state: State, tracker: Tracker | None, ht
             print(weekly.markdown)
         return 0
     n = Notification(due.name, weekly.report.title, [], config.language, config.tz, now, report=weekly.report)
-    attempted, succeeded = await send_all(config, http, n)
+    attempted, succeeded = await send_all(config, http, n, destinations)
     if attempted and not succeeded:
         log.warn(f"group #{idx}: no channel delivered; will retry on the next run")
         return 1
@@ -319,15 +332,21 @@ async def tracker_sync(config_path: str | None, data_dir: Path, push: bool = Tru
     return 1 if result.failed else 0
 
 
-async def test_notify(config_path: str | None, data_dir: Path) -> int:
+async def test_notify(config_path: str | None, data_dir: Path, push: bool = True) -> int:
+    """A test message to every channel (and, with ``notify.routing``, to every chat: the chats the bots still
+    have to create are created now and saved, so the first real run finds them)."""
     config = load_or_report(config_path, data_dir, push=False)
     log.info("notification channels:")
     for line in credentials_checklist(config):
         log.info(line)
+    state, now = State(data_dir), now_utc()
     async with Http(config.http) as http:
-        n = Notification("test", "test", [], config.language, config.tz, now_utc(), test=True,
+        destinations = _destinations(config, http, state, data_dir, now, push)
+        n = Notification("test", "test", [], config.language, config.tz, now, test=True,
                          buttons=open_tracker(config, data_dir) is not None)
-        attempted, succeeded = await send_all(config, http, n)
+        attempted, succeeded = await send_all(config, http, n, destinations)
+    if destinations is not None and destinations.created:
+        log.info(f"routing: {destinations.created} chat(s) created or found, saved to the data repository")
     log.info(f"test notification: {succeeded}/{attempted} channels OK")
     return 0 if attempted and succeeded == attempted else 1
 

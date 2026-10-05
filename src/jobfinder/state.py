@@ -2,7 +2,8 @@
 
 ``state/seen.json``  – every job ever seen: first/last seen, where it was notified,
                        cached AI verdicts.
-``state/runs.json``  – scheduling bookkeeping per group and health per source.
+``state/runs.json``  – scheduling bookkeeping per group and health per source, and (with
+                       ``notify.routing``) the ids of the chats the bots created.
 """
 
 from __future__ import annotations
@@ -41,6 +42,9 @@ class State:
         self.runs_path = self.dir / "runs.json"
         self.seen: dict[str, dict[str, Any]] = {}
         self.runs: dict[str, Any] = {"groups": {}, "sources": {}, "monitors": {}}
+        # channel ("discord" | "telegram") -> chat name -> id of the channel / topic the bot created or adopted.
+        # Kept apart from `runs` so a run without routing writes runs.json exactly as before.
+        self.destinations: dict[str, dict[str, Any]] = {}
         self._index: dict[str, set[str]] | None = None  # fingerprint / canonical URL -> job keys
         self._touched: dict[str, set[str]] = {"sources": set(), "monitors": set()}
         # True when something worth committing changed (new jobs, notifications, health changes...).
@@ -55,6 +59,7 @@ class State:
             loaded = json.loads(self.runs_path.read_text(encoding="utf-8"))
             for k in ("groups", "sources", "monitors"):
                 self.runs[k] = loaded.get(k, {})
+            self.destinations = loaded.get("destinations", {})
 
     def save(self) -> None:
         self.prune()
@@ -62,8 +67,9 @@ class State:
         self.seen_path.write_text(
             json.dumps({"jobs": self.seen}, ensure_ascii=False, indent=1, sort_keys=True) + "\n", encoding="utf-8"
         )
+        runs = {**self.runs, "destinations": self.destinations} if self.destinations else self.runs
         self.runs_path.write_text(
-            json.dumps(self.runs, ensure_ascii=False, indent=1, sort_keys=True) + "\n", encoding="utf-8"
+            json.dumps(runs, ensure_ascii=False, indent=1, sort_keys=True) + "\n", encoding="utf-8"
         )
 
     def merge_with_disk(self) -> None:
@@ -94,7 +100,23 @@ class State:
             for k, theirs in other.runs[section].items():
                 if k not in self._touched[section]:
                     self.runs[section][k] = theirs
+        for channel, routes in other.destinations.items():
+            ours = self.destinations.setdefault(channel, {})
+            for route, theirs in routes.items():
+                # Two runs that created the same chat at once: both keep the older one (smaller id).
+                ours[route] = min(ours[route], theirs, key=int) if route in ours else theirs
         self._index = None
+
+    # -------------------------------------------------------------- destinations
+    def destination(self, channel: str, route: str) -> str | int | None:
+        return self.destinations.get(channel, {}).get(route)
+
+    def set_destination(self, channel: str, route: str, ident: str | int) -> None:
+        """Remember a chat the bot created or adopted. It is committed even by a run with nothing else to save:
+        losing it would create the chat again."""
+        if self.destinations.setdefault(channel, {}).get(route) != ident:
+            self.destinations[channel][route] = ident
+            self.material = True
 
     def prune(self, now: datetime | None = None) -> None:
         limit = (now or now_utc()) - timedelta(days=PRUNE_AFTER_DAYS)

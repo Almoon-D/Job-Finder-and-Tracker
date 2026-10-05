@@ -24,6 +24,11 @@ def slugify(value: str) -> str:
     return value.strip("-") or "source"
 
 
+def route_slug(name: str) -> str:
+    """The Discord channel name of a chat name: lowercase, letters/digits/_ and dashes only."""
+    return re.sub(r"[^\w-]+", "-", name.strip().lower()).strip("-")[:100]
+
+
 class _Model(BaseModel):
     # coerce_numbers_to_str: YAML turns `2027` into an int; keyword lists expect strings.
     model_config = ConfigDict(extra="forbid", coerce_numbers_to_str=True)
@@ -235,11 +240,54 @@ class LLMConfig(_Model):
     extra_instructions: str = ""
 
 
+def _name_map(value: Any, what: str, convert: Any) -> dict[str, Any]:
+    """A mapping name -> id. Errors never name the key: config errors are printed in public CI logs."""
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError(f"{what} must be a mapping")
+    out: dict[str, Any] = {}
+    for key, item in value.items():
+        name = str(key).strip()
+        try:
+            out[name] = convert(item)
+        except (TypeError, ValueError):
+            raise ValueError(f"{what} has an invalid entry") from None
+        if not name:
+            raise ValueError(f"{what} has an empty name")
+    return out
+
+
+def _chat_id(value: Any) -> str:
+    text = str(value).strip()
+    if not text.isdigit():
+        raise ValueError("not an id")
+    return text
+
+
+def _topic_id(value: Any) -> int:
+    number = int(str(value).strip())
+    if number < 0:
+        raise ValueError("not an id")
+    return number
+
+
 class TelegramConfig(_Model):
     enabled: bool = False
     bot_token_env: str = "TELEGRAM_BOT_TOKEN"
     chat_id_env: str = "TELEGRAM_CHAT_ID"
     disable_preview: bool = True
+    topics: dict[str, Any] = Field(
+        default_factory=dict,
+        description="With notify.routing: route name -> topic id (message_thread_id) of the forum group; 0 is the "
+                    "General topic. A route without an id gets a topic created by the bot (it must be an admin "
+                    "with the Manage topics right).",
+    )
+
+    @field_validator("topics", mode="before")
+    @classmethod
+    def _topics(cls, v: Any) -> dict[str, int]:
+        return _name_map(v, "notify.telegram.topics", _topic_id)
 
 
 class DiscordConfig(_Model):
@@ -253,6 +301,71 @@ class DiscordConfig(_Model):
     )
     bot_token_env: str = "DISCORD_BOT_TOKEN"
     channel_id_env: str = "DISCORD_CHANNEL_ID"
+    guild_id: str | None = Field(
+        None, description="With notify.routing: the server (default: the one DISCORD_CHANNEL_ID belongs to)."
+    )
+    category: str | None = Field(
+        None, description="With notify.routing: category name for the channels the bot creates "
+                          "(default: the category of DISCORD_CHANNEL_ID)."
+    )
+    channels: dict[str, Any] = Field(
+        default_factory=dict,
+        description="With notify.routing: route name -> channel id. A route without an id gets a channel adopted "
+                    "(same name) or created by the bot (it needs Manage Channels).",
+    )
+
+    @field_validator("channels", mode="before")
+    @classmethod
+    def _channels(cls, v: Any) -> dict[str, str]:
+        return _name_map(v, "notify.discord.channels", _chat_id)
+
+
+class RoutingConfig(_Model):
+    """Several chats instead of one (Discord channels through the bot, Telegram forum topics).
+
+    Each field is the NAME of a chat; a name that is not set means "the default chat" (DISCORD_CHANNEL_ID /
+    the group's General topic). Nothing changes until at least one name is set.
+    """
+
+    summary: str | None = Field(None, description="Compact index of every new offer, health warnings, weekly report.")
+    highlights: str | None = Field(
+        None, description="Offers from favourite sources, or with an AI fit of highlight_score or more (also posted "
+                          "in their place chat)."
+    )
+    highlight_score: int = Field(85, ge=0, le=100)
+    other: str | None = Field(None, description="Offers without a place of their own, and the fallback chat.")
+    places: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Place (as shown in digests: the location's label, else its city, else its country name) -> "
+                    "chat name. Several places may share one chat.",
+    )
+
+    @field_validator("summary", "highlights", "other", mode="before")
+    @classmethod
+    def _names(cls, v: Any) -> str | None:
+        text = str(v).strip() if v is not None else ""
+        return text or None
+
+    @field_validator("places", mode="before")
+    @classmethod
+    def _places(cls, v: Any) -> dict[str, str]:
+        return _name_map(v, "notify.routing.places", lambda item: _non_empty(item))
+
+    @property
+    def active(self) -> bool:
+        return bool(self.summary or self.highlights or self.other or self.places)
+
+    def routes(self) -> list[str]:
+        """Every chat name, once, in a stable order: summary, highlights, places, other."""
+        names = [self.summary, self.highlights, *self.places.values(), self.other]
+        return list(dict.fromkeys(n for n in names if n))
+
+
+def _non_empty(value: Any) -> str:
+    text = str(value).strip()
+    if not text:
+        raise ValueError("empty")
+    return text
 
 
 class EmailConfig(_Model):
@@ -285,6 +398,7 @@ class NotifyConfig(_Model):
     email: EmailConfig = Field(default_factory=EmailConfig)
     ntfy: NtfyConfig = Field(default_factory=NtfyConfig)
     apprise: AppriseConfig = Field(default_factory=AppriseConfig)
+    routing: RoutingConfig = Field(default_factory=RoutingConfig)
     health_alert_after_failures: int = Field(2, ge=1)
 
 
@@ -360,7 +474,28 @@ class Config(_Model):
             for f in s.role_families or []:
                 if f not in families:
                     raise ValueError(f"source {s.name!r} references unknown role family {f!r}")
+        self._check_routing()
         return self
+
+    def _check_routing(self) -> None:
+        """Routing names are private (public CI logs print config errors): the messages name none of them."""
+        routing = self.notify.routing
+        if not routing.active:
+            return
+        from ..matching.location import display_name  # imported here: location.py imports this module
+        from ..models import normalize_text
+
+        known = {normalize_text(display_name(spec)) for spec in self.locations}
+        if any(normalize_text(place) not in known for place in routing.places):
+            raise ValueError("notify.routing.places has a place that is not one of your `locations` "
+                             "(use its label, else its city, else its country name)")
+        slugs = {route_slug(name) for name in routing.routes()}
+        if len(slugs) != len(routing.routes()) or "" in slugs:
+            raise ValueError("notify.routing has two chats whose names become the same Discord channel name")
+        names = set(routing.routes())
+        if any(name not in names for name in (*self.notify.discord.channels, *self.notify.telegram.topics)):
+            raise ValueError("notify.discord.channels / notify.telegram.topics name a chat that notify.routing "
+                             "does not define")
 
     @property
     def tz(self) -> ZoneInfo:

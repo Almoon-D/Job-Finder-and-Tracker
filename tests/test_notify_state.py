@@ -126,6 +126,31 @@ def test_state_merge_with_concurrent_run(tmp_path):
     assert set(c.runs["groups"]) == {"favorites", "company_sites"}
 
 
+def test_destinations_are_saved_merged_and_do_not_change_runs_json_when_unused(tmp_path):
+    empty = State(tmp_path)
+    empty.save()
+    plain = (tmp_path / "state" / "runs.json").read_text()
+    assert "destinations" not in plain  # a run without routing writes the file exactly as before
+
+    a = State(tmp_path)
+    b = State(tmp_path)  # a concurrent run that started from the same state
+    assert not a.material
+    a.set_destination("discord", "Lisboa", "900000000000000002")
+    a.set_destination("telegram", "Lisboa", 14)
+    assert a.material  # even a polling run with nothing else to save must commit the new chat
+    a.save()
+    b.set_destination("discord", "Lisboa", "900000000000000001")  # created at the same time: the older id wins
+    b.set_destination("discord", "Otros", "900000000000000005")
+    b.merge_with_disk()
+    b.save()
+    c = State(tmp_path)
+    assert c.destination("discord", "Lisboa") == "900000000000000001"
+    assert c.destination("discord", "Otros") == "900000000000000005"
+    assert c.destination("telegram", "Lisboa") == 14 and c.destination("telegram", "Otros") is None
+    a.merge_with_disk()
+    assert a.destination("discord", "Lisboa") == "900000000000000001"  # both runs converge
+
+
 def test_prune(tmp_path):
     s = State(tmp_path)
     j = Job("s", "1", "PB", "https://x", "Acme")

@@ -167,6 +167,19 @@ notify:                          # credentials always come from GitHub Secrets
   email: {enabled: false}
   ntfy: {enabled: false}
   apprise: {enabled: false}
+  # Several chats instead of one: Discord channels (bot mode, notify.discord.bot: true) and Telegram forum
+  # topics (a supergroup with Topics, the bot an admin with "Manage topics"). The bot creates the chats it
+  # needs; run `test-notify` once to see them appear. Without this block everything goes to one chat.
+  # routing:
+  #   summary: Resumen              # compact index of every new offer + health warnings + weekly report
+  #   highlights: Destacadas        # favourite sources, or a fit of highlight_score or more (also in its place chat)
+  #   highlight_score: 85
+  #   other: Otros                  # no place of its own (and the fallback)
+  #   places:                       # place as shown in digests (label, else city, else country) -> chat name
+  #     Germany: DACH
+  #     Lisbon: Lisboa
+  # discord: {channels: {Lisboa: "123456789012345678"}}   # optional: an existing channel instead of creating one
+  # telegram: {topics: {Lisboa: 12}}                      # optional: an existing topic (0 = General)
 
 # Tracker: ⭐/✅/🗣/❌ buttons on per-job Telegram messages (✅ ❌ per job in grouped digests), or ✅ ❌
 # reactions with the Discord bot. Saved in tracker/applications.csv of the private repo (editable by
