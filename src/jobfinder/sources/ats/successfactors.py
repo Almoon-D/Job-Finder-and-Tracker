@@ -3,7 +3,8 @@
 Two flavours exist:
 
 * Legacy portal ``https://careerN.successfactors.eu/career?company=<id>`` – exposes
-  an XML listing (``resultType=XML``). Auto-detected from the URL.
+  an XML listing (``resultType=XML``). Auto-detected from the URL. Some tenants (Sabadell,
+  Naturgy) answer an empty list unless the site locale is sent: set ``locale: es_ES``.
 * Recruiting Marketing ("RMK") sites on a custom domain (e.g. careers.example.com,
   pages like /job/<slug>/<id>/) – configure ``type: successfactors`` and the site
   root as ``url``. The newest jobs are read from the search page and details from
@@ -28,6 +29,11 @@ PAGE = 25
 _JOB_ID = re.compile(r"/(\d+)/?$")
 
 
+def _first(fields: dict[str, str], *labels: str) -> str | None:
+    """The first non-empty filter value among these (lower-case) labels: tenants label them in their language."""
+    return next((fields[x] for x in labels if fields.get(x)), None)
+
+
 @register
 class SuccessFactors(Adapter):
     type_name = "successfactors"
@@ -46,7 +52,8 @@ class SuccessFactors(Adapter):
     async def _legacy(self) -> list[Job]:
         p = self.params
         base = f"https://{p['host']}/career?company={p['company']}"
-        xml = await self.http.get_text(f"{base}&career_ns=job_listing_summary&resultType=XML")
+        locale = f"&rcm_site_locale={p['locale']}" if p.get("locale") else ""
+        xml = await self.http.get_text(f"{base}&career_ns=job_listing_summary&resultType=XML{locale}")
         root = ElementTree.fromstring(xml.encode("utf-8"))
         jobs = []
         for node in root.iter("Job"):
@@ -57,9 +64,12 @@ class SuccessFactors(Adapter):
                 (child.findtext("label") or "").strip().lower(): (child.findtext("value") or "").strip()
                 for child in node if child.find("label") is not None
             }
-            loc = ", ".join(x for x in (fields.get("city"), fields.get("state"), fields.get("country")) if x)
+            loc = ", ".join(x for x in (_first(fields, "city", "ciudad", "localidad"),
+                                        _first(fields, "state", "región/provincia/estado", "provincia"),
+                                        _first(fields, "country", "país", "pais")) if x)
+            posted, precision = parse_date(node.findtext("Posted-Date"), self.ctx.now)
             jobs.append(self.job(req, html_to_text(title), f"{base}&career_ns=job_listing&career_job_req_id={req}",
-                                 locations=[loc] if loc else [],
+                                 locations=[loc] if loc else [], posted_at=posted, posted_precision=precision,
                                  description=html_to_text(node.findtext("Job-Description") or "")))
         return jobs
 

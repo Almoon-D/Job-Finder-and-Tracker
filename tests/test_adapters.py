@@ -175,6 +175,19 @@ async def test_successfactors_legacy(tmp_path):
 
 
 @respx.mock
+async def test_successfactors_legacy_sends_the_locale_and_reads_spanish_fields_and_dates(tmp_path):
+    route = respx.get(url__startswith="https://career2.successfactors.eu/career").mock(
+        return_value=httpx.Response(200, text=fixture_text("sf_legacy_es.xml")))
+    ctx = ctx_for(tmp_path, url="https://career2.successfactors.eu/career?company=C0004183745P", locale="es_ES")
+    jobs = await build_adapter(ctx).fetch()
+    assert "rcm_site_locale=es_ES" in str(route.calls[0].request.url)  # without it the tenant lists nothing
+    assert jobs[0].locations == ["Madrid, España"]
+    assert (jobs[0].posted_at.year, jobs[0].posted_at.month, jobs[0].posted_at.day) == (2026, 9, 24)  # dd/mm/yyyy
+    assert jobs[0].posted_precision == "date"
+    await ctx.http.aclose()
+
+
+@respx.mock
 async def test_rss(tmp_path):
     respx.get("https://careers.example.test/rss").mock(return_value=httpx.Response(200, text=fixture_text("rss.xml")))
     ctx = ctx_for(tmp_path, type="rss", url="https://careers.example.test/rss", location_tag="category")
@@ -279,6 +292,24 @@ async def test_jsonld_sitemap_cdata_and_loose_json(tmp_path):
     assert [j.title for j in jobs] == ["Wealth Planner"]  # CDATA read, old URL skipped
     assert jobs[0].description == "Advise families on succession"  # raw newline in the JSON string
     assert jobs[0].locations == ["Lisbon, PT"] and jobs[0].posted_at.day == 25
+    await ctx.http.aclose()
+
+
+@respx.mock
+async def test_rss_reads_atom_links_dates_and_title_locations(tmp_path):
+    respx.get("https://careers.example.test/feed").mock(return_value=httpx.Response(200, text=fixture_text("atom.xml")))
+    ctx = ctx_for(tmp_path, type="rss", url="https://careers.example.test/feed",
+                  location_regex=r"\(([^()]+)\)\s*$")
+    jobs = await build_adapter(ctx).fetch()
+    assert [j.title for j in jobs] == ["Associate - Private Funds Group (London)",
+                                       "Analyst & Associate - Private Banking (Madrid)", "Director - Global Technology"]
+    # the href of the alternate link, not the text that follows the (self-closing) <link/> element
+    assert jobs[0].url == "https://careers.example.test/opp/3386-Associate-Private-Funds-London/en-GB?instant=apply"
+    assert jobs[1].url.endswith("3363-Analyst-Madrid/en-GB?instant=apply")  # not the enclosure
+    assert jobs[2].url == "https://careers.example.test/opp/3300-Director-Global/en-GB"
+    assert jobs[0].native_id == "https://careers.example.test/opp/3386-Associate-Private-Funds-London/en-GB"
+    assert [j.locations for j in jobs] == [["London"], ["Madrid"], []]
+    assert jobs[0].posted_at.isoformat().startswith("2026-09-30T10:10:17")
     await ctx.http.aclose()
 
 
