@@ -46,8 +46,6 @@ MESSAGES = {
         "tracker_test": "Prueba: {status} (no se guarda)",
         "test_buttons": "Botones de prueba: pulsa uno y, en la siguiente sincronización (tracker-sync o la "
                         "próxima ejecución), el botón aparecerá marcado.",
-        "test_reactions": "Reacciones de prueba: reacciona con ⭐ ✅ 🗣️ ❌ y, en la siguiente sincronización "
-                          "(tracker-sync o la próxima ejecución), el mensaje mostrará el estado.",
         "tracker_title": "📋 Tracker",
         "tracker_empty": "Todavía no hay ofertas marcadas. Usa los botones de cada aviso.",
         "tracker_recent": "Últimos cambios",
@@ -132,8 +130,6 @@ MESSAGES = {
         "tracker_test": "Test: {status} (not saved)",
         "test_buttons": "Test buttons: press one and, at the next sync (tracker-sync or the next run), the button "
                         "shows as selected.",
-        "test_reactions": "Test reactions: react with ⭐ ✅ 🗣️ ❌ and, at the next sync (tracker-sync or the next "
-                          "run), the message shows the status.",
         "tracker_title": "📋 Tracker",
         "tracker_empty": "Nothing tracked yet. Use the buttons on each alert.",
         "tracker_recent": "Latest changes",

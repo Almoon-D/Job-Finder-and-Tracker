@@ -66,8 +66,6 @@ jobs:
           SMTP_PASSWORD:          ${{ secrets.SMTP_PASSWORD }}
           EMAIL_TO:               ${{ secrets.EMAIL_TO }}
           DISCORD_WEBHOOK_URL:    ${{ secrets.DISCORD_WEBHOOK_URL }}
-          DISCORD_BOT_TOKEN:      ${{ secrets.DISCORD_BOT_TOKEN }}
-          DISCORD_CHANNEL_ID:     ${{ secrets.DISCORD_CHANNEL_ID }}
           NTFY_TOPIC:             ${{ secrets.NTFY_TOPIC }}
           NTFY_TOKEN:             ${{ secrets.NTFY_TOKEN }}
           APPRISE_URLS:           ${{ secrets.APPRISE_URLS }}

@@ -261,17 +261,12 @@ dashboard, use the Glance widget above.
 
 ## 5. Discord
 
-A Discord webhook (`DISCORD_WEBHOOK_URL`) cannot show tracker buttons or reactions: it has no bot
-identity, and with `?with_components=true` it can only send link buttons. Real buttons need a
-Discord *application* that receives clicks through the gateway or an interactions endpoint, and both
-need a server that is always running, which GitHub Actions cannot provide.
-
-Reactions do work without a server. Give the tool a **bot** (`DISCORD_BOT_TOKEN` +
-`DISCORD_CHANNEL_ID`, see `docs/SETUP.es.md` §5) and every per-job alert gets ⭐ ✅ 🗣️ ❌ reactions
-added by the bot. At each run and at `tracker-sync`, the tool reads the reactions of the last 60 days
-of messages through the REST API (one request per message, no gateway, no privileged intents),
-saves them in `tracker/applications.csv` and writes `» ✅ Applied «` at the top of the message.
-Without the bot, Discord keeps receiving the alerts and the weekly summary through the webhook.
+Discord webhooks cannot show tracker buttons. A webhook created in the channel settings (the
+`DISCORD_WEBHOOK_URL` this tool uses) cannot send interactive components. With
+`?with_components=true` it can only send link buttons. Button clicks are delivered to a Discord
+*application* through an interactions endpoint or the gateway, and both need a server that is
+always running. GitHub Actions cannot provide one. Discord keeps receiving the alerts and the
+weekly summary. Track jobs with Telegram, or by editing the CSV on the web.
 
 ## 6. How these examples were tested
 

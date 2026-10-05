@@ -4,40 +4,21 @@ from __future__ import annotations
 
 import asyncio
 import html
-import json
 import os
 import smtplib
 import ssl
 from email.message import EmailMessage
 from pathlib import Path
-from urllib.parse import quote
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
-from .. import log
 from ..i18n import t
-from ..sources.http import HttpError
-from ..tracker.buttons import BUTTONS, DISCORD_EMOJI, TEST_ID, job_id, keyboard
+from ..tracker.buttons import TEST_ID, job_id, keyboard
 from .base import Channel, ChannelError, Notification
 
 
 def env(name: str) -> str:
     return os.environ.get(name, "").strip()
-
-
-def api_reason(exc: HttpError) -> str:
-    """'HTTP 400: chat not found': the API's own error text (Telegram ``description``, Discord ``message``).
-
-    It never holds ids or secrets, so it can go to the public log; the raw response never does.
-    """
-    try:
-        data = json.loads(exc.body)
-    except ValueError:
-        data = None
-    text = (data.get("description") or data.get("message")) if isinstance(data, dict) else None
-    if exc.status is None:
-        return str(exc)
-    return f"HTTP {exc.status}" + (f": {text[:200]}" if isinstance(text, str) and text else "")
 
 
 def chunk(parts: list[str], limit: int, sep: str = "\n\n") -> list[str]:
@@ -107,10 +88,7 @@ class Telegram(Channel):
                    "disable_web_page_preview": cfg.disable_preview, "disable_notification": silent}
         if markup:
             payload["reply_markup"] = markup
-        try:
-            data = await self.http.post_json(f"https://api.telegram.org/bot{token}/sendMessage", json=payload)
-        except HttpError as exc:
-            raise ChannelError(api_reason(exc)) from exc
+        data = await self.http.post_json(f"https://api.telegram.org/bot{token}/sendMessage", json=payload)
         result = data.get("result") if isinstance(data, dict) else None
         return result if isinstance(result, dict) else {}
 
@@ -179,15 +157,7 @@ def pack_embeds(embeds: list[dict], max_embeds: int = 10, max_chars: int = 6000)
     return out
 
 
-DISCORD_API = "https://discord.com/api/v10"
-
-
 class Discord(Channel):
-    """Webhook (embeds only) or, with a bot token and channel id, a bot that also adds ⭐✅🗣❌ reactions.
-
-    Webhooks cannot react to their own messages; the reactions are read back by tracker/discord_sync.py.
-    """
-
     name = "discord"
     DESCRIPTION = 4096
 
@@ -203,46 +173,13 @@ class Discord(Channel):
                 embeds.append({"title": heading[:256], "description": block, "color": color})
         return embeds
 
-    # ------------------------------------------------------------------ bot
-    async def _bot_call(self, token: str, method: str, path: str, **kwargs) -> dict:
-        try:
-            resp = await self.http.request(method, f"{DISCORD_API}{path}",
-                                           headers={"Authorization": f"Bot {token}"}, **kwargs)
-        except HttpError as exc:
-            raise ChannelError(f"Discord bot: {api_reason(exc)}") from exc
-        try:
-            data = resp.json() if resp.content else {}
-        except ValueError:
-            data = {}
-        return data if isinstance(data, dict) else {}
-
-    async def _bot_post(self, token: str, channel: str, payload: dict) -> dict:
-        return await self._bot_call(token, "POST", f"/channels/{channel}/messages", json=payload)
-
-    async def _bot_react(self, token: str, channel: str, message_id: str) -> None:
-        """Add the four reactions; a missing permission is reported once and does not lose the message."""
-        for status in BUTTONS:
-            emoji = quote(DISCORD_EMOJI[status])
-            try:
-                await self._bot_call(token, "PUT", f"/channels/{channel}/messages/{message_id}/reactions/{emoji}/@me")
-            except ChannelError as exc:
-                log.warn(f"notify/discord: could not add reactions ({exc}); the bot needs 'Add Reactions' "
-                         "and 'Read Message History'")
-                return
-            await asyncio.sleep(0.35)  # Discord allows about 1 reaction per 0.25 s
-
-    async def _send_bot(self, n: Notification, token: str, channel: str, color: int) -> None:
-        """Per-job messages with reactions (and the tracker); everything else is posted as plain embeds."""
-        content = f"**{n.title}**"
-        footer = "\n".join(footer_lines(n))[:2048]
+    async def send(self, n: Notification) -> None:
+        url = env(self.config.notify.discord.webhook_env)
+        if not url:
+            raise ChannelError(f"missing {self.config.notify.discord.webhook_env}")
+        color = 0xF5A623 if n.priority == "high" else 0x2F80ED
         if n.test:
-            text = f"{content}\n{t(n.lang, 'test_body')}"
-            if n.buttons:  # the tracker's reactions, to try the whole loop (react → sync → marked)
-                text += f"\n\n{t(n.lang, 'test_reactions')}"
-            sent = await self._bot_post(token, channel, {"content": text[:2000]})
-            if n.buttons and sent.get("id"):
-                await self._bot_react(token, channel, str(sent["id"]))
-                n.discord_sent.append((TEST_ID, "", str(sent.get("channel_id") or channel), int(sent["id"])))
+            await self.http.request("POST", url, json={"content": f"**{n.title}**\n{t(n.lang, 'test_body')}"})
             return
         if n.report is not None:
             embeds = [{"title": heading[:256], "description": ("\n".join(lines) or "—")[: self.DESCRIPTION],
@@ -250,71 +187,27 @@ class Discord(Channel):
         elif n.format == "grouped":
             embeds = self._grouped_embeds(n, color)
         else:
-            embeds = None  # per job, below
-        if embeds is not None or n.empty or not n.buttons or n.format != "per_job":
-            await self._send_embeds(n, content, footer, embeds if embeds is not None else self._job_embeds(n, color),
-                                    lambda payload: self._bot_post(token, channel, payload))
-            return
-        await self._bot_post(token, channel, {"content": content[:2000]})
-        for job in n.shown:
-            await asyncio.sleep(0.6)
-            sent = await self._bot_post(token, channel, {"embeds": self._job_embeds(n, color, [job])})
-            if job.kind == "job" and sent.get("id"):
-                await self._bot_react(token, channel, str(sent["id"]))
-                n.discord_sent.append((job_id(job.key), job.key, str(sent.get("channel_id") or channel),
-                                       int(sent["id"])))
-        if n.hidden_count or n.problems:
-            await self._bot_post(token, channel, {"content": footer[:2000]})
-
-    # --------------------------------------------------------------- embeds
-    def _job_embeds(self, n: Notification, color: int, jobs: list | None = None) -> list[dict]:
-        return [
-            {
-                "title": n.job_heading(j)[:256],
-                "url": j.url,
-                "description": "\n".join(n.job_meta(j))[:4000],
-                "color": color,
-            }
-            for j in (n.shown if jobs is None else jobs)
-        ]
-
-    async def _send_embeds(self, n: Notification, content: str, footer: str, embeds: list[dict], post) -> None:
+            embeds = [
+                {
+                    "title": n.job_heading(j)[:256],
+                    "url": j.url,
+                    "description": "\n".join(n.job_meta(j))[:4000],
+                    "color": color,
+                }
+                for j in n.shown
+            ]
+        content = f"**{n.title}**"
+        footer = "\n".join(footer_lines(n))[:2048]
         if not embeds:
-            await post({"content": f"{content}\n{footer}"[:2000]})
+            await self.http.request("POST", url, json={"content": f"{content}\n{footer}"[:2000]})
             return
         embeds[-1]["footer"] = {"text": footer}
         for i, batch in enumerate(pack_embeds(embeds)):
             payload: dict = {"embeds": batch}
             if i == 0:
                 payload["content"] = content[:2000]
-            await post(payload)
-            await asyncio.sleep(0.6)
-
-    async def send(self, n: Notification) -> None:
-        color = 0xF5A623 if n.priority == "high" else 0x2F80ED
-        bot = self.config.notify.discord.bot_credentials()
-        if bot:
-            await self._send_bot(n, *bot, color)
-            return
-        url = env(self.config.notify.discord.webhook_env)
-        if not url:
-            cfg = self.config.notify.discord
-            raise ChannelError(f"missing {cfg.webhook_env} (or {cfg.bot_token_env} and {cfg.channel_id_env})")
-
-        async def post(payload: dict) -> None:
             await self.http.request("POST", url, json=payload)
-
-        if n.test:
-            await post({"content": f"**{n.title}**\n{t(n.lang, 'test_body')}"})
-            return
-        if n.report is not None:
-            embeds = [{"title": heading[:256], "description": ("\n".join(lines) or "—")[: self.DESCRIPTION],
-                       "color": color} for heading, lines in n.report.sections]
-        elif n.format == "grouped":
-            embeds = self._grouped_embeds(n, color)
-        else:
-            embeds = self._job_embeds(n, color)
-        await self._send_embeds(n, f"**{n.title}**", "\n".join(footer_lines(n))[:2048], embeds, post)
+            await asyncio.sleep(0.6)
 
 
 # ------------------------------------------------------------------------ Email

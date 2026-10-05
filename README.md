@@ -53,11 +53,10 @@ looking for.
   the favourites workflow keeps itself alive, polling every 10 minutes (off by default;
   see [docs/SETUP.es.md](docs/SETUP.es.md) §8).
 - **Health alerts** when a source fails repeatedly or suddenly returns nothing.
-- **Application tracker in Telegram or Discord**: every per-job alert has ⭐ Interested · ✅ Applied ·
-  🗣 Interview · ❌ Discard buttons (Telegram) or reactions (a Discord bot). Presses are saved in
-  `tracker/applications.csv` in the private repo, a file you can also edit on the GitHub website.
-  `/status` and `/pending` commands (Telegram). There is no server: the bot is polled at every run
-  and by a `tracker-sync` run every 1–3 h.
+- **Application tracker in Telegram**: every per-job alert has ⭐ Interested · ✅ Applied ·
+  🗣 Interview · ❌ Discard buttons. Presses are saved in `tracker/applications.csv` in the private
+  repo, a file you can also edit on the GitHub website. `/status` and `/pending` commands. There is
+  no server: the bot is polled at every run and by a `tracker-sync` run every 1–3 h.
 - **Weekly summary** to every channel, and saved as `reports/weekly/YYYY-Www.md`. It covers new jobs
   per group, company and role family, matches against discards, the tracker funnel, and source health.
 - **Private feeds** (JSON Feed 1.1, RSS, summary and tracker JSON) for dashboards. Tested examples for
@@ -91,13 +90,12 @@ See [docs/PRIVACY.md](docs/PRIVACY.md) for the full privacy model.
 3. Create a fine-grained token with **Contents: read & write** on that private repo only.
 4. In your fork: add the variable `DATA_REPO` (`you/job-finder-data`) and the secret
    `DATA_REPO_TOKEN`, plus the secrets of the channels you want (`TELEGRAM_BOT_TOKEN`,
-   `TELEGRAM_CHAT_ID`, `SMTP_*`, `EMAIL_TO`, `DISCORD_WEBHOOK_URL` or `DISCORD_BOT_TOKEN` + `DISCORD_CHANNEL_ID`, `NTFY_TOPIC`…) and,
+   `TELEGRAM_CHAT_ID`, `SMTP_*`, `EMAIL_TO`, `DISCORD_WEBHOOK_URL`, `NTFY_TOPIC`…) and,
    optionally, AI keys (`GEMINI_API_KEY`, `NVIDIA_API_KEY`, `GROQ_API_KEY`), `IMAP_*` for
    alert e-mails and `INFOJOBS_*` / `ADZUNA_*`. The workflows pass secrets one by one: a new
    secret name must also be added to their `env:` block.
-5. Run **Actions → jobfinder → Run workflow** with `mode: validate`, then `test-notify` (it
-   lists which channels are enabled and which secrets are missing; the Telegram message shows the
-   tracker buttons and the Discord bot message the reactions) and `test-ai`.
+5. Run **Actions → jobfinder → Run workflow** with `mode: validate`, then `test-notify` (its
+   Telegram message shows the tracker buttons) and `test-ai`.
 6. Optional but recommended: trigger the workflows from [cron-job.org](https://cron-job.org)
    for punctual alerts, and `mode: tracker-sync` every 1–3 h for the tracker (see the setup guide).
 

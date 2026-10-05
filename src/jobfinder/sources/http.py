@@ -15,10 +15,9 @@ RETRY_STATUS = {429, 500, 502, 503, 504, 999}
 
 
 class HttpError(Exception):
-    def __init__(self, status: int | None, message: str, body: str = ""):
+    def __init__(self, status: int | None, message: str):
         super().__init__(message)
         self.status = status
-        self.body = body  # response text (cut); never logged: channels read only the API's own error field
 
 
 class Http:
@@ -71,7 +70,7 @@ class Http:
                     await asyncio.sleep(min(delay, 30) + random.random())
                     continue
                 if resp.status_code >= 400:
-                    raise HttpError(resp.status_code, f"HTTP {resp.status_code}", resp.text[:500])
+                    raise HttpError(resp.status_code, f"HTTP {resp.status_code}")
                 return resp
             except (httpx.TransportError, httpx.TimeoutException) as exc:
                 last_exc = exc
