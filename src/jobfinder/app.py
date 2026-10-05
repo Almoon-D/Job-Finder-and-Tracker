@@ -11,7 +11,7 @@ from .config.loader import ConfigError, load_config
 from .config.schema import Config, Group, Source
 from .matching.pipeline import GroupOutcome, Runner
 from .notify.base import Notification
-from .notify.dispatch import send_all
+from .notify.dispatch import credentials_checklist, send_all
 from .scheduling import DueGroup, due_groups
 from .sources.http import Http
 from .state import State, iso, now_utc
@@ -321,13 +321,14 @@ async def tracker_sync(config_path: str | None, data_dir: Path, push: bool = Tru
 
 async def test_notify(config_path: str | None, data_dir: Path) -> int:
     config = load_or_report(config_path, data_dir, push=False)
+    log.info("notification channels:")
+    for line in credentials_checklist(config):
+        log.info(line)
     async with Http(config.http) as http:
         n = Notification("test", "test", [], config.language, config.tz, now_utc(), test=True,
                          buttons=open_tracker(config, data_dir) is not None)
         attempted, succeeded = await send_all(config, http, n)
     log.info(f"test notification: {succeeded}/{attempted} channels OK")
-    if attempted == 0:
-        log.warn("no notification channel is enabled in the config")
     return 0 if attempted and succeeded == attempted else 1
 
 

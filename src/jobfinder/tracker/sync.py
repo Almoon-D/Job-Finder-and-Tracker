@@ -66,6 +66,19 @@ class TelegramSync:
             log.detail(f"tracker: {method} HTTP {exc.status}")
             return False
 
+    async def _drop_webhook(self) -> bool:
+        """A webhook makes getUpdates fail for good: remove it (this tool never uses one). True if one was set."""
+        try:
+            info = await self._call("getWebhookInfo", {})
+            if not (info.get("result") or {}).get("url"):
+                return False
+            log.warn("tracker: a webhook was set on the Telegram bot (getUpdates cannot work with one): removing it")
+            await self._call("deleteWebhook", {})
+        except HttpError as exc:
+            log.detail(f"tracker: webhook check HTTP {exc.status}")
+            return False
+        return True
+
     def _our_chat(self, chat: dict | None) -> bool:
         chat = chat or {}
         mine = self.chat.strip()
@@ -213,10 +226,10 @@ class TelegramSync:
                 data = await self._call("getUpdates", payload)
             except HttpError as exc:
                 if exc.status == 409:
-                    # Either a webhook is set (getUpdates never works: call deleteWebhook) or another run
-                    # (favourites, main, tracker-sync) was reading updates at that moment: the next sync reads them.
-                    log.warn("tracker: Telegram answered 409 (a webhook is set on the bot, or another run was "
-                             "reading updates at the same time)")
+                    # Either a webhook is set (getUpdates never works) or another run (favourites, main,
+                    # tracker-sync) was reading updates at that moment: the next sync reads them.
+                    if not await self._drop_webhook():
+                        log.warn("tracker: Telegram answered 409 (another run was reading updates at the same time)")
                 else:
                     log.warn(f"tracker: getUpdates failed ({exc})")
                     self.result.failed = True

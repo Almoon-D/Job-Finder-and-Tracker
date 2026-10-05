@@ -79,10 +79,21 @@ Activa en `config.yaml` (`notify:`) los canales que vayas a usar.
 2. Escribe cualquier mensaje a tu bot.
 3. Abre `https://api.telegram.org/bot<TOKEN>/getUpdates` en el navegador y copia el número
    de `"chat":{"id": ...}` → secret `TELEGRAM_CHAT_ID`.
+4. En el `config.yaml` del repo privado pon `notify: {telegram: {enabled: true}}`. Por defecto
+   Telegram está **desactivado** y, si falta eso, no se envía nada ni se avisa de ningún error.
+5. Ejecuta el workflow con `mode: test-notify`. El log lista qué canales están activados y qué
+   secrets faltan (`TELEGRAM_CHAT_ID=MISSING`), y si Telegram rechaza el envío muestra su motivo
+   (`HTTP 400: Bad Request: chat not found` → chat id incorrecto o no pulsaste *Start* en el bot;
+   `HTTP 401: Unauthorized` → token incorrecto).
+
+Los secrets se crean en el repo **público** (Settings → Secrets and variables → Actions) con
+exactamente esos nombres: `TELEGRAM_BOT_TOKEN` y `TELEGRAM_CHAT_ID`. Un nombre distinto llega
+vacío al programa (`missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID`).
 
 No configures un *webhook* en el bot (`setWebhook`). El tracker (§14) lee los botones con
-`getUpdates`, que no funciona si hay un webhook. Cuando el tracker ya está en marcha, es normal que
-esa URL de `getUpdates` salga vacía: la herramienta ya ha leído los mensajes.
+`getUpdates`, que no funciona si hay un webhook. Si hay uno, la herramienta lo quita sola al ver el
+error 409. Cuando el tracker ya está en marcha, es normal que esa URL de `getUpdates` salga vacía: la
+herramienta ya ha leído los mensajes.
 
 ### Email con Gmail
 1. Activa la **verificación en dos pasos** de tu cuenta de Google.

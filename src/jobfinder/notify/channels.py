@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import html
+import json
 import os
 import smtplib
 import ssl
@@ -15,12 +16,28 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from .. import log
 from ..i18n import t
+from ..sources.http import HttpError
 from ..tracker.buttons import GROUP_BUTTONS, GROUP_ROWS, TEST_ID, grouped_keyboard, job_id, keyboard
 from .base import Channel, ChannelError, Notification
 
 
 def env(name: str) -> str:
     return os.environ.get(name, "").strip()
+
+
+def api_reason(exc: HttpError) -> str:
+    """'HTTP 400: chat not found': the API's own error text (Telegram ``description``, Discord ``message``).
+
+    It never holds ids or secrets, so it can go to the public log; the raw response never does.
+    """
+    try:
+        data = json.loads(exc.body)
+    except ValueError:
+        data = None
+    text = (data.get("description") or data.get("message")) if isinstance(data, dict) else None
+    if exc.status is None:
+        return str(exc)
+    return f"HTTP {exc.status}" + (f": {text[:200]}" if isinstance(text, str) and text else "")
 
 
 def chunk(parts: list[str], limit: int, sep: str = "\n\n") -> list[str]:
@@ -126,7 +143,10 @@ class Telegram(Channel):
                    "disable_web_page_preview": cfg.disable_preview, "disable_notification": silent}
         if markup:
             payload["reply_markup"] = markup
-        data = await self.http.post_json(f"https://api.telegram.org/bot{token}/sendMessage", json=payload)
+        try:
+            data = await self.http.post_json(f"https://api.telegram.org/bot{token}/sendMessage", json=payload)
+        except HttpError as exc:
+            raise ChannelError(api_reason(exc)) from exc
         result = data.get("result") if isinstance(data, dict) else None
         return result if isinstance(result, dict) else {}
 
@@ -239,8 +259,11 @@ class Discord(Channel):
         return None
 
     async def _bot(self, method: str, token: str, path: str, **kwargs):
-        return await self.http.request(method, f"{self.API}{path}", headers={"Authorization": f"Bot {token}"},
-                                       **kwargs)
+        try:
+            return await self.http.request(method, f"{self.API}{path}", headers={"Authorization": f"Bot {token}"},
+                                           **kwargs)
+        except HttpError as exc:
+            raise ChannelError(f"Discord bot: {api_reason(exc)}") from exc
 
     async def _send_bot(self, n: Notification, token: str, channel: str, color: int) -> None:
         """One message per job (an embed) with ✅ ❌ already added; the tracker reads the reactions."""

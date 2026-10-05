@@ -219,13 +219,60 @@ async def test_status_and_pending_commands(tmp_path):
 
 
 @respx.mock
-async def test_webhook_conflict_is_reported(tmp_path, capsys):
+async def test_webhook_conflict_removes_the_webhook(tmp_path, capsys):
     write_config(tmp_path)
     mock_telegram(updates_status=409)
-    assert await tracker_sync(None, tmp_path, push=False, now=NOW) == 0  # not fatal: may be a concurrent run
-    assert "webhook" in capsys.readouterr().err
+    info = respx.post(f"{BASE}/getWebhookInfo").mock(return_value=httpx.Response(
+        200, json={"ok": True, "result": {"url": "https://hooks.example.test/tg"}}))
+    delete = respx.post(f"{BASE}/deleteWebhook").mock(return_value=httpx.Response(200, json={"ok": True}))
+    assert await tracker_sync(None, tmp_path, push=False, now=NOW) == 0  # not fatal
+    assert info.call_count == 1 and delete.call_count == 1
+    err = capsys.readouterr().err
+    assert "webhook was set" in err and "hooks.example.test" not in err  # the url is never logged
+
+
+@respx.mock
+async def test_conflict_without_a_webhook_is_a_concurrent_run(tmp_path, capsys):
+    write_config(tmp_path)
+    mock_telegram(updates_status=409)
+    respx.post(f"{BASE}/getWebhookInfo").mock(return_value=httpx.Response(200, json={"ok": True, "result": {"url": ""}}))
+    delete = respx.post(f"{BASE}/deleteWebhook").mock(return_value=httpx.Response(200, json={"ok": True}))
+    assert await tracker_sync(None, tmp_path, push=False, now=NOW) == 0
+    assert delete.call_count == 0 and "another run" in capsys.readouterr().err
     mock_telegram(updates_status=502)
     assert await tracker_sync(None, tmp_path, push=False, now=NOW) == 1
+
+
+# ------------------------------------------------------------- diagnostics
+@respx.mock
+async def test_telegram_error_reason_is_logged_without_ids(tmp_path, capsys):
+    write_config(tmp_path)
+    respx.post(f"{BASE}/sendMessage").mock(return_value=httpx.Response(
+        400, json={"ok": False, "error_code": 400, "description": "Bad Request: chat not found"}))
+    assert await send_test_notification(None, tmp_path) == 1
+    err = capsys.readouterr().err
+    assert "notify/telegram: failed (HTTP 400: Bad Request: chat not found)" in err
+    assert TOKEN not in err
+
+
+async def test_test_notify_lists_what_is_missing(tmp_path, monkeypatch, capsys):
+    write_config(tmp_path)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID")
+    assert await send_test_notification(None, tmp_path) == 1
+    err = capsys.readouterr().err
+    assert "telegram: enabled (TELEGRAM_BOT_TOKEN=set, TELEGRAM_CHAT_ID=MISSING)" in err
+    assert "discord: disabled in config.yaml" in err
+    assert "notify/telegram: failed (missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID)" in err
+    assert TOKEN not in err
+
+
+async def test_no_enabled_channel_is_called_out(tmp_path, capsys):
+    write_config(tmp_path)
+    path = tmp_path / "config.yaml"
+    path.write_text(path.read_text(encoding="utf-8").replace("telegram: {enabled: true}", "telegram: {enabled: false}"),
+                    encoding="utf-8")
+    assert await send_test_notification(None, tmp_path) == 1
+    assert "no channel is enabled" in capsys.readouterr().err
 
 
 # --------------------------------------------------------------------- CSV
@@ -465,6 +512,23 @@ async def test_discord_bot_posts_one_message_per_job_with_reactions(discord_env)
     assert put.call_count == 6
     assert [t for _, _, t, _ in n.sent] == [f"discord:{CHANNEL}"] * 3
     assert "Portales: 3 ofertas nuevas" in bodies(post)[0]["content"] and bodies(post)[1]["embeds"][0]["url"]
+
+
+@respx.mock
+async def test_discord_bot_error_reason_reaches_the_log(discord_env, capsys):
+    from jobfinder.notify.base import ChannelError
+    from jobfinder.notify.channels import Discord
+    from jobfinder.sources.http import Http
+
+    from .conftest import make_config
+
+    respx.post(f"{DISCORD}/channels/{CHANNEL}/messages").mock(
+        return_value=httpx.Response(403, json={"message": "Missing Access", "code": 50001}))
+    cfg = make_config(notify={"discord": {"enabled": True, "bot": True}})
+    async with Http() as http:
+        with pytest.raises(ChannelError, match="Discord bot: HTTP 403: Missing Access") as caught:
+            await Discord(cfg, http).send(_grouped_note(2))
+    assert "bot-token" not in str(caught.value)
 
 
 @respx.mock
