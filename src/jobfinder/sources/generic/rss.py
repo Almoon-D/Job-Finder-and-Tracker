@@ -3,7 +3,7 @@
     - name: Example feed
       type: rss
       url: https://example.com/jobs/feed
-      location_regex: "Location:\\s*([^<\\n]+)"   # optional, applied to the description
+      location_regex: "Location:\\s*([^<\\n]+)"   # optional, applied to the description, then to the title
 """
 
 from __future__ import annotations
@@ -30,19 +30,31 @@ def _txt(node: Node, *tags: str) -> str:
 class Rss(Adapter):
     type_name = "rss"
 
+    @staticmethod
+    def _link(item: Node) -> str:
+        """RSS: the <link> text. Atom: the href of the alternate link (the first one when none says so)."""
+        links = item.css("jflink")
+        for link in sorted(links, key=lambda n: n.attributes.get("rel") not in (None, "alternate")):
+            href = (link.attributes.get("href") or link.text(strip=True) or "").strip()
+            if href:
+                return href
+        return ""
+
     async def fetch(self) -> list[Job]:
         url = self.params.get("url")
         if not url:
             raise AdapterError("rss needs 'url'")
         xml = unwrap_cdata(await self.http.get_text(url))
-        # selectolax is an HTML parser: <link> is a void element there, so rename it first.
+        # selectolax is an HTML parser: <link> is a void element there, so rename it first. Atom writes
+        # <link href="..."/>: close it explicitly, or the parser would swallow the siblings that follow.
+        xml = re.sub(r"<link\b([^>]*?)\s*/>", r"<jflink\1></jflink>", xml)
         xml = re.sub(r"<(/?)link\b", r"<\1jflink", xml)
         tree = HTMLParser(xml)
         loc_rx = re.compile(self.params["location_regex"]) if self.params.get("location_regex") else None
         jobs = []
         for item in tree.css("item") or tree.css("entry"):
             title = html_to_text(_txt(item, "title"))
-            link = _txt(item, "jflink", "guid", "id")
+            link = self._link(item) or _txt(item, "guid", "id")
             if not title or not link:
                 continue
             desc_raw = _txt(item, "description", "summary", "content")
@@ -50,7 +62,7 @@ class Rss(Adapter):
             posted, precision = parse_date(_txt(item, "pubdate", "published", "updated", "dc\\:date"), self.ctx.now)
             locs = []
             if loc_rx:
-                m = loc_rx.search(desc_raw) or loc_rx.search(desc)
+                m = loc_rx.search(desc_raw) or loc_rx.search(desc) or loc_rx.search(title)
                 if m:
                     locs.append(m.group(1).strip())
             locs += [c.text(strip=True) for c in item.css(self.params.get("location_tag", "_none_"))]

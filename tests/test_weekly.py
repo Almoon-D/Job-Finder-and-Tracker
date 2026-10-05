@@ -163,3 +163,35 @@ def test_every_rejection_reason_has_a_label_in_both_languages():
     assert "source_family" in REASON_KEYS
     for lang in ("es", "en"):
         assert all(key in MESSAGES[lang] for key in REASON_KEYS.values()), lang
+
+
+def test_acceptance_by_source_and_family_needs_enough_marks(tmp_path):
+    """From five ✅/❌ answers on, the tracker section shows which families and sources you keep or discard."""
+    from jobfinder.config.loader import load_config
+    from jobfinder.tracker import Tracker, TrackerOp, job_id
+    from jobfinder.weekly import build_weekly
+
+    seed(tmp_path)
+    state = State(tmp_path)
+    tracker = Tracker(tmp_path, "es", load_config(tmp_path / "config.yaml").tz)
+    plan = [("bank-one:1", "applied"), ("bank-one:2", "discarded"), ("board:1", "discarded")]
+
+    def build():
+        config = load_config(tmp_path / "config.yaml")
+        return build_weekly(config, state, tracker, tmp_path, SUNDAY_18, "Resumen", {}, RunStats())
+
+    for key, status in plan:
+        state.seen[key]["src"] = key.split(":")[0]
+        tracker.remember(job_id(key), key, "42", 1, "2026-09-25")
+        tracker.apply(TrackerOp(job_id(key), status, "2026-09-25"))
+    assert "Aceptación" not in build().markdown  # 3 answers plus the 2 hand-made rows without a known source
+
+    for i, status in enumerate(("applied", "discarded")):
+        key = f"bank-one:x{i}"
+        state.seen[key] = {**state.seen["bank-one:1"], "family": "producto"}
+        tracker.remember(job_id(key), key, "42", 1, "2026-09-25")
+        tracker.apply(TrackerOp(job_id(key), status, "2026-09-25"))
+    weekly = build()
+    assert "Aceptación (te interesó / total marcadas): Datos 0/1 · Producto 2/4" in "\n".join(
+        line for _, lines in weekly.report.sections for line in lines)
+    assert "### Aceptación" in weekly.markdown and "| Board | 0 | 1 |" in weekly.markdown

@@ -53,7 +53,7 @@ Use `jobfinder detect <url>` to see which adapter handles a URL, and
 | `oracle_hcm` | `https://<host>.oraclecloud.<tld>/hcmUI/CandidateExperience/<lang>/sites/<site>` (`.com`, or a regional data centre such as `fa.ocs.oraclecloud.eu`) | Server-side country filter, sorted by posting date. |
 | `eightfold` | `https://<company>.eightfold.ai/careers` | PCSX API, falls back to `/api/apply/v2`. Add `?domain=company.com` if needed. |
 | `brassring` | `https://<host>/TGnewUI/Search/Home/Home?partnerid=<n>&siteid=<n>` | IBM/Infinite BrassRing Talent Gateway; newest first, stops at the age window. |
-| `successfactors` | `https://careerN.successfactors.eu/career?company=<id>` | Legacy XML listing. For RMK sites on a custom domain set `type: successfactors` and `url:` the site root. |
+| `successfactors` | `https://careerN.successfactors.eu/career?company=<id>` | Legacy XML listing (some tenants, e.g. Sabadell, answer an empty list unless you add `locale: es_ES`; it reads `Posted-Date` and Spanish location labels). For RMK sites on a custom domain set `type: successfactors` and `url:` the site root. |
 | `greenhouse` | `boards.greenhouse.io/<board>` or `job-boards.greenhouse.io/<board>` | |
 | `lever` | `jobs.lever.co/<company>` | |
 | `smartrecruiters` | `jobs.smartrecruiters.com/<Company>` | Server-side country filter. |
@@ -289,8 +289,12 @@ then the refresh date.
   type: rss
   url: https://careers.example.test/jobs.rss
   location_tag: category          # take locations from <category> elements
-  location_regex: "Location:\\s*([^<\\n]+)"
+  location_regex: "Location:\\s*([^<\\n]+)"   # tried on the description first, then on the title
 ```
+
+Atom feeds work too (`<entry>`, `<published>`/`<updated>`, the `href` of the `alternate` link). When a feed has
+no location field but titles end like `Associate - Advisory (London)`, use
+`location_regex: "\\(([^()]+)\\)\\s*$"`.
 
 ### `page_monitor`
 

@@ -11,7 +11,7 @@ from .config.loader import ConfigError, load_config
 from .config.schema import Config, Group, Source
 from .matching.pipeline import GroupOutcome, Runner
 from .notify.base import Notification
-from .notify.dispatch import send_all
+from .notify.dispatch import credentials_checklist, send_all
 from .scheduling import DueGroup, due_groups
 from .sources.http import Http
 from .state import State, iso, now_utc
@@ -179,7 +179,7 @@ async def run(
                 family_labels={f.name: f.label or f.name.replace("_", " ").capitalize() for f in config.role_families},
                 place_order=[tg.display for tg in runner.locations.targets],
                 also_elsewhere=outcome.also_elsewhere,
-                buttons=tracker is not None and group.format == "per_job",
+                buttons=tracker is not None and group.format in ("per_job", "grouped"),
                 tracker_status=tracker.statuses() if tracker is not None else {},
             )
             announced = not (n.empty and not group.notify_empty and not n.problems)
@@ -194,6 +194,8 @@ async def run(
                 day = tracker.today(now).isoformat()
                 for jid, key, chat, message_id in n.sent:
                     tracker.remember(jid, key, chat, message_id, day)
+                for chat, message_id, jids, start in n.layouts:
+                    tracker.remember_layout(chat, message_id, jids, start, day)
             if delivered:
                 for job in outcome.jobs:
                     state.mark_notified(job, d.name, now)
@@ -303,7 +305,7 @@ async def tracker_sync(config_path: str | None, data_dir: Path, push: bool = Tru
     config = load_or_report(config_path, data_dir, push)
     tracker = open_tracker(config, data_dir)
     if tracker is None:
-        log.info("tracker: disabled (needs tracker.enabled and notify.telegram.enabled)")
+        log.info("tracker: disabled (needs tracker.enabled and notify.telegram.enabled or notify.discord.bot)")
         return 0
     state = State(data_dir)
     now = now or now_utc()
@@ -319,13 +321,14 @@ async def tracker_sync(config_path: str | None, data_dir: Path, push: bool = Tru
 
 async def test_notify(config_path: str | None, data_dir: Path) -> int:
     config = load_or_report(config_path, data_dir, push=False)
+    log.info("notification channels:")
+    for line in credentials_checklist(config):
+        log.info(line)
     async with Http(config.http) as http:
         n = Notification("test", "test", [], config.language, config.tz, now_utc(), test=True,
                          buttons=open_tracker(config, data_dir) is not None)
         attempted, succeeded = await send_all(config, http, n)
     log.info(f"test notification: {succeeded}/{attempted} channels OK")
-    if attempted == 0:
-        log.warn("no notification channel is enabled in the config")
     return 0 if attempted and succeeded == attempted else 1
 
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import html
+import re
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -19,7 +20,7 @@ from ..i18n import t
 from ..notify.channels import chunk, env
 from ..sources.http import Http, HttpError
 from ..state import State
-from .buttons import TEST_ID, job_id, keyboard, parse_callback
+from .buttons import TEST_ID, grouped_keyboard, job_id, keyboard, parse_callback
 from .store import STATUSES, Tracker, TrackerOp, parse_status, status_label
 
 MAX_PAGES = 5  # 100 updates per page
@@ -65,6 +66,19 @@ class TelegramSync:
             log.detail(f"tracker: {method} HTTP {exc.status}")
             return False
 
+    async def _drop_webhook(self) -> bool:
+        """A webhook makes getUpdates fail for good: remove it (this tool never uses one). True if one was set."""
+        try:
+            info = await self._call("getWebhookInfo", {})
+            if not (info.get("result") or {}).get("url"):
+                return False
+            log.warn("tracker: a webhook was set on the Telegram bot (getUpdates cannot work with one): removing it")
+            await self._call("deleteWebhook", {})
+        except HttpError as exc:
+            log.detail(f"tracker: webhook check HTTP {exc.status}")
+            return False
+        return True
+
     def _our_chat(self, chat: dict | None) -> bool:
         chat = chat or {}
         mine = self.chat.strip()
@@ -91,9 +105,13 @@ class TelegramSync:
 
     async def _refresh(self, jid: str, extra: tuple[str, int] | None = None) -> None:
         """Show the current status on every message that carries this job's buttons."""
-        markup = keyboard(jid, self.tracker.status_of(jid), self.lang)
         targets = list(dict.fromkeys([*self.tracker.refs(jid), *([extra] if extra else [])]))
         for chat, message_id in targets:
+            layout = self.tracker.layout(chat, message_id)
+            if layout:  # grouped digest: every job of the message keeps its own ✅ ❌ row
+                markup = grouped_keyboard(layout["jids"], self.tracker.statuses(), layout["start"])
+            else:
+                markup = keyboard(jid, self.tracker.status_of(jid), self.lang)
             await self._quiet("editMessageReplyMarkup",
                               {"chat_id": chat, "message_id": message_id, "reply_markup": markup})
 
@@ -120,9 +138,25 @@ class TelegramSync:
             self.result.rows_changed += 1
         if where:
             self.tracker.remember(jid, key, where[0], where[1], self.today)
+            if self.tracker.layout(*where) is None:
+                self._learn_layout(where, message)
         await self._quiet("answerCallbackQuery", {"callback_query_id": query.get("id"),
                                                   "text": t(self.lang, "tracker_saved", status=label)})
         await self._refresh(jid, where)
+
+    def _learn_layout(self, where: tuple[str, int], message: dict) -> None:
+        """A grouped digest whose layout was not saved: read it from the keyboard the message carries."""
+        jids, start = [], None
+        for row in (message.get("reply_markup") or {}).get("inline_keyboard") or []:
+            parsed = [parse_callback(b.get("callback_data")) for b in row]
+            number = re.match(r"^(?:» )?(\d+) ", row[0].get("text", "")) if row else None
+            if (len(row) != 2 or not all(parsed) or [p[0] for p in parsed] != ["applied", "discarded"]
+                    or parsed[0][1] != parsed[1][1] or not number):
+                return  # not a grouped keyboard
+            jids.append(parsed[0][1])
+            start = start or int(number[1])
+        if jids and start:
+            self.tracker.remember_layout(where[0], where[1], jids, start, self.today)
 
     async def _on_message(self, message: dict) -> None:
         text = (message.get("text") or "").strip()
@@ -192,10 +226,10 @@ class TelegramSync:
                 data = await self._call("getUpdates", payload)
             except HttpError as exc:
                 if exc.status == 409:
-                    # Either a webhook is set (getUpdates never works: call deleteWebhook) or another run
-                    # (favourites, main, tracker-sync) was reading updates at that moment: the next sync reads them.
-                    log.warn("tracker: Telegram answered 409 (a webhook is set on the bot, or another run was "
-                             "reading updates at the same time)")
+                    # Either a webhook is set (getUpdates never works) or another run (favourites, main,
+                    # tracker-sync) was reading updates at that moment: the next sync reads them.
+                    if not await self._drop_webhook():
+                        log.warn("tracker: Telegram answered 409 (another run was reading updates at the same time)")
                 else:
                     log.warn(f"tracker: getUpdates failed ({exc})")
                     self.result.failed = True
@@ -224,4 +258,16 @@ class TelegramSync:
 
 
 async def sync(config: Config, http: Http, tracker: Tracker, state: State, now: datetime) -> SyncResult:
-    return await TelegramSync(config, http, tracker, state, now).run()
+    """Read Telegram buttons and commands and, with the Discord bot on, ✅ ❌ reactions."""
+    result = SyncResult()
+    if config.notify.telegram.enabled:
+        result = await TelegramSync(config, http, tracker, state, now).run()
+    if config.notify.discord.bot:
+        from .discord_sync import DiscordSync
+
+        found = await DiscordSync(config, http, tracker, state, now).run()
+        result.updates += found.updates
+        result.buttons += found.buttons
+        result.rows_changed += found.rows_changed
+        result.failed = result.failed or found.failed
+    return result

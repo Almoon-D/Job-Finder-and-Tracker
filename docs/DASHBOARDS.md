@@ -265,8 +265,14 @@ Discord webhooks cannot show tracker buttons. A webhook created in the channel s
 `DISCORD_WEBHOOK_URL` this tool uses) cannot send interactive components. With
 `?with_components=true` it can only send link buttons. Button clicks are delivered to a Discord
 *application* through an interactions endpoint or the gateway, and both need a server that is
-always running. GitHub Actions cannot provide one. Discord keeps receiving the alerts and the
-weekly summary. Track jobs with Telegram, or by editing the CSV on the web.
+always running. GitHub Actions cannot provide one.
+
+Reactions can be polled, though. With `notify.discord.bot: true` a bot (secrets
+`DISCORD_BOT_TOKEN` and `DISCORD_CHANNEL_ID`) posts **one message per job** with ✅ and ❌ already
+added, and the tracker sync reads the channel history for reactions someone else added. It needs
+the bot to be in the server with the permissions *View Channel*, *Send Messages*, *Embed Links*,
+*Add Reactions* and *Read Message History*. Without the credentials the alert falls back to the
+webhook digest. Details in the Spanish setup guide, §14.
 
 ## 6. How these examples were tested
 

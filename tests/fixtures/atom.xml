@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <id>https://careers.example.test/feed</id>
+  <link rel="self" href="https://careers.example.test/feed" type="application/atom+xml"/>
+  <title>Experienced Hires</title>
+  <updated>2026-10-05T15:00:28Z</updated>
+  <link rel="alternate" href="https://careers.example.test/board" type="text/html"/>
+  <entry>
+    <id>https://careers.example.test/opp/3386-Associate-Private-Funds-London/en-GB</id>
+    <link rel="alternate" href="https://careers.example.test/opp/3386-Associate-Private-Funds-London/en-GB?instant=apply" type="text/html"/>
+    <title>Associate - Private Funds Group (London)</title>
+    <updated>2026-09-30T10:10:17Z</updated>
+    <published>2026-09-30T10:10:17Z</published>
+    <content type="xhtml"><div xmlns="http://www.w3.org/1999/xhtml">Title:Associate - Private Funds Group (London)<br/> </div></content>
+  </entry>
+  <entry>
+    <id>https://careers.example.test/opp/3363-Analyst-Madrid/en-GB</id>
+    <link rel="enclosure" href="https://careers.example.test/files/3363.pdf"/>
+    <link rel="alternate" href="https://careers.example.test/opp/3363-Analyst-Madrid/en-GB?instant=apply" type="text/html"/>
+    <title>Analyst &amp; Associate - Private Banking (Madrid)</title>
+    <updated>2026-09-29T20:07:30Z</updated>
+    <published>2026-09-29T20:07:30Z</published>
+    <content type="xhtml"><div xmlns="http://www.w3.org/1999/xhtml">Title:Analyst &amp; Associate<br/> </div></content>
+  </entry>
+  <entry>
+    <id>https://careers.example.test/opp/3300-Director-Global/en-GB</id>
+    <link rel="alternate" href="https://careers.example.test/opp/3300-Director-Global/en-GB" type="text/html"/>
+    <title>Director - Global Technology</title>
+    <updated>2026-09-01T08:00:00Z</updated>
+    <published>2026-09-01T08:00:00Z</published>
+  </entry>
+</feed>

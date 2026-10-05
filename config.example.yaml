@@ -163,15 +163,16 @@ llm:
 
 notify:                          # credentials always come from GitHub Secrets
   telegram: {enabled: true}
-  discord: {enabled: false}
+  discord: {enabled: false}      # bot: true → one message per job with ✅ ❌ reactions (DISCORD_BOT_TOKEN, DISCORD_CHANNEL_ID)
   email: {enabled: false}
   ntfy: {enabled: false}
   apprise: {enabled: false}
 
-# Tracker: ⭐/✅/🗣/❌ buttons on per-job Telegram messages, saved in tracker/applications.csv
-# of the private repo (editable by hand). Commands: /status and /pending (or /estado, /pendientes).
+# Tracker: ⭐/✅/🗣/❌ buttons on per-job Telegram messages (✅ ❌ per job in grouped digests), or ✅ ❌
+# reactions with the Discord bot. Saved in tracker/applications.csv of the private repo (editable by
+# hand). Commands: /status and /pending (or /estado, /pendientes).
 tracker:
-  enabled: true                  # only with notify.telegram
+  enabled: true                  # only with notify.telegram or notify.discord.bot
   follow_up_days: 14             # /pending also lists applications without news for this long
 
 feeds:                           # feeds/*.json and jobs.xml for dashboards (docs/DASHBOARDS.md)
