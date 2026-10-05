@@ -4,7 +4,8 @@
                                the GitHub website: unknown columns, row order and ``notes`` are
                                kept; changing ``status`` by hand is recorded in ``history``.
 ``state/tracker.json``       – Telegram bookkeeping: the getUpdates offset and, for each job id,
-                               the messages that carry its buttons (to keep them in sync).
+                               the messages that carry its buttons (to keep them in sync); and, for
+                               the Discord bot, each message that carries reactions.
 """
 
 from __future__ import annotations
@@ -119,6 +120,7 @@ class Tracker:
     def _load(self) -> None:
         self.offset: int | None = None
         self.messages: dict[str, dict[str, Any]] = {}
+        self.discord: dict[str, dict[str, Any]] = {}  # message id -> {jid, key, channel, day, seen: [emoji]}
         self.rows: list[dict[str, str]] = []
         self.headers: dict[str, str] = {}  # field -> header as written in the file
         self.extra: list[str] = []  # columns added by hand, kept in their order
@@ -127,6 +129,7 @@ class Tracker:
             data = json.loads(self.state_path.read_text(encoding="utf-8"))
             self.offset = data.get("offset")
             self.messages = data.get("messages", {})
+            self.discord = data.get("discord", {})
         if not self.csv_path.exists():
             return
         with self.csv_path.open(encoding="utf-8-sig", newline="") as fh:
@@ -171,13 +174,17 @@ class Tracker:
                     self.messages[jid]["refs"] = refs
                 else:
                     del self.messages[jid]
+            for mid in [m for m, ref in self.discord.items() if ref.get("day", "") < cutoff]:
+                del self.discord[mid]
             self.state_path.parent.mkdir(parents=True, exist_ok=True)
-            data = {"offset": self.offset, "messages": self.messages}
+            data: dict[str, Any] = {"offset": self.offset, "messages": self.messages}
+            if self.discord:
+                data["discord"] = self.discord
             self.state_path.write_text(json.dumps(data, ensure_ascii=False, indent=1, sort_keys=True) + "\n", "utf-8")
 
     def merge_with_disk(self, now: datetime) -> None:
         """Reload the version on disk (pushed by a concurrent run or edited on the web) and re-apply ours."""
-        offset, messages = self.offset, self.messages
+        offset, messages, discord = self.offset, self.messages, self.discord
         self._load()
         if offset is not None and (self.offset is None or self.offset < offset):
             self.offset = offset
@@ -186,6 +193,8 @@ class Tracker:
             theirs["key"] = theirs.get("key") or mine.get("key")
             known = {(r[0], r[1]) for r in theirs["refs"]}
             theirs["refs"] += [r for r in mine.get("refs", []) if (r[0], r[1]) not in known]
+        for mid, mine in discord.items():  # ours is the latest reading of the reactions
+            self.discord[mid] = mine
         self._state_dirty = True
         self.detect_manual(self.today(now).isoformat())
         for op in self.ops:
@@ -289,6 +298,22 @@ class Tracker:
     def refs(self, jid: str) -> list[tuple[str, int]]:
         return [(r[0], r[1]) for r in self.messages.get(jid, {}).get("refs", [])]
 
+    # ---------------------------------------------------------- discord
+    def remember_discord(self, jid: str, key: str | None, channel: str, message_id: int, day: str) -> None:
+        """A Discord message with this job's reactions was sent."""
+        self.discord[str(message_id)] = {"jid": jid, "key": key, "channel": str(channel), "day": day, "seen": []}
+        self._state_dirty = True
+
+    def set_discord_seen(self, message_id: str, seen: list[str]) -> None:
+        ref = self.discord.get(message_id)
+        if ref is not None and ref.get("seen") != seen:
+            ref["seen"] = seen
+            self._state_dirty = True
+
+    def forget_discord(self, message_id: str) -> None:
+        if self.discord.pop(message_id, None) is not None:
+            self._state_dirty = True
+
     # ------------------------------------------------------------ queries
     def counts(self) -> dict[str, int]:
         """Rows per canonical status ('other' for statuses typed by hand that are not known)."""
@@ -357,7 +382,10 @@ class Tracker:
 
 
 def open_tracker(config: Config, data_dir: Path) -> Tracker | None:
-    """The tracker, when it is enabled and Telegram (the only channel with buttons) is on."""
-    if not config.tracker.enabled or not config.notify.telegram.enabled:
+    """The tracker, when it is enabled and a channel with buttons is on: Telegram or a Discord bot."""
+    discord = config.notify.discord
+    if not config.tracker.enabled or not (
+        config.notify.telegram.enabled or (discord.enabled and discord.bot_credentials())
+    ):
         return None
     return Tracker(data_dir, config.language, config.tz)

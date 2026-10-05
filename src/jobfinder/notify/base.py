@@ -44,9 +44,10 @@ class Notification:
     family_labels: dict[str, str] = field(default_factory=dict)  # family name -> display name, in config order
     place_order: list[str] = field(default_factory=list)  # location display names, in config order
     also_elsewhere: int = 0  # matches not repeated because another group already sent them
-    buttons: bool = False  # Telegram per-job tracker buttons
+    buttons: bool = False  # per-job tracker buttons (Telegram) / reactions (Discord bot)
     tracker_status: dict[str, str] = field(default_factory=dict)  # job id -> current tracker status
     sent: list[tuple[str, str, str, int]] = field(default_factory=list)  # (job id, job key, chat, message id)
+    discord_sent: list[tuple[str, str, str, int]] = field(default_factory=list)  # same, for the Discord bot
     report: Report | None = None
 
     @property

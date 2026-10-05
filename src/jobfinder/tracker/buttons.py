@@ -8,6 +8,7 @@ from ..i18n import t
 
 PREFIX = "jf1"
 BUTTONS = ("interested", "applied", "interview", "discarded")  # 2×2 grid, in this order
+DISCORD_EMOJI = {"interested": "⭐", "applied": "✅", "interview": "🗣️", "discarded": "❌"}  # Discord reactions
 TEST_ID = "test"  # buttons of the test-notify message: the sync edits them but saves nothing
 
 
@@ -26,6 +27,12 @@ def parse_callback(data: str | None) -> tuple[str, str] | None:
     if len(parts) != 3 or parts[0] != PREFIX or parts[1] not in BUTTONS or not parts[2]:
         return None
     return parts[1], parts[2]
+
+
+def emoji_status(emoji: str | None) -> str | None:
+    """Status of a Discord reaction ('✅' → 'applied'); other emojis (or a missing variation selector) work too."""
+    plain = (emoji or "").replace("\ufe0f", "")
+    return next((s for s, e in DISCORD_EMOJI.items() if e.replace("\ufe0f", "") == plain), None)
 
 
 def button_label(status: str, lang: str) -> str:

@@ -54,7 +54,8 @@ Repo público → **Settings → Secrets and variables → Actions**:
 | `DATA_REPO_TOKEN` | El PAT #1 |
 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | Telegram |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `EMAIL_TO` | Email |
-| `DISCORD_WEBHOOK_URL` | Discord |
+| `DISCORD_WEBHOOK_URL` | Discord con webhook (solo avisos) |
+| `DISCORD_BOT_TOKEN`, `DISCORD_CHANNEL_ID` | Discord con bot (avisos y reacciones ⭐✅🗣️❌ para el tracker) |
 | `NTFY_TOPIC` (y `NTFY_TOKEN` si tu servidor lo pide) | ntfy |
 | `APPRISE_URLS` | Otros servicios vía Apprise (Slack, Gotify, Pushover…), separados por espacios |
 | `GEMINI_API_KEY`, `NVIDIA_API_KEY`, `GROQ_API_KEY` (también `OPENROUTER_API_KEY`, `CEREBRAS_API_KEY`, `MISTRAL_API_KEY`) | IA opcional (§6) |
@@ -78,6 +79,12 @@ Activa en `config.yaml` (`notify:`) los canales que vayas a usar.
 2. Escribe cualquier mensaje a tu bot.
 3. Abre `https://api.telegram.org/bot<TOKEN>/getUpdates` en el navegador y copia el número
    de `"chat":{"id": ...}` → secret `TELEGRAM_CHAT_ID`.
+4. En el `config.yaml` del repo privado pon `notify: {telegram: {enabled: true}}`. Por defecto
+   Telegram está **desactivado** y, si falta eso, no se envía nada ni se avisa de ningún error.
+5. Ejecuta el workflow con `mode: test-notify`. El log lista qué canales están activados y qué
+   secrets faltan (`TELEGRAM_CHAT_ID=MISSING`), y si Telegram rechaza el envío muestra su motivo
+   (`HTTP 400: Bad Request: chat not found` → chat id incorrecto o no pulsaste *Start* en el bot;
+   `HTTP 401: Unauthorized` → token incorrecto).
 
 No configures un *webhook* en el bot (`setWebhook`). El tracker (§14) lee los botones con
 `getUpdates`, que no funciona si hay un webhook. Cuando el tracker ya está en marcha, es normal que
@@ -94,8 +101,21 @@ esa URL de `getUpdates` salga vacía: la herramienta ya ha leído los mensajes.
    - `EMAIL_TO=destino@loquesea.com` (varios separados por comas)
 
 ### Discord
-Canal → **Editar canal → Integraciones → Webhooks → Nuevo webhook** → *Copiar URL* →
-secret `DISCORD_WEBHOOK_URL`.
+**Solo avisos (webhook).** Canal → **Editar canal → Integraciones → Webhooks → Nuevo webhook** →
+*Copiar URL* → secret `DISCORD_WEBHOOK_URL`. Un webhook no puede añadir reacciones ni botones.
+
+**Avisos con reacciones ⭐ ✅ 🗣️ ❌ (bot).** Para el tracker (§14):
+1. <https://discord.com/developers/applications> → **New Application** → **Bot** → *Reset Token* →
+   copia el token → secret `DISCORD_BOT_TOKEN`. No hace falta activar ningún *Privileged Intent*.
+2. **OAuth2 → URL Generator**: scope `bot` y permisos *View Channel*, *Send Messages*,
+   *Embed Links*, *Add Reactions* y *Read Message History*. Abre la URL e invita el bot a tu
+   servidor.
+3. Si el canal es privado, da esos permisos al bot en el canal.
+4. Ajustes de Discord → **Avanzado → Modo desarrollador**. Clic derecho en el canal →
+   *Copiar ID del canal* → secret `DISCORD_CHANNEL_ID`.
+5. En `config.yaml`: `notify: {discord: {enabled: true}}`. Con `DISCORD_BOT_TOKEN` y
+   `DISCORD_CHANNEL_ID` el bot sustituye al webhook.
+6. Ejecuta `mode: test-notify`: el mensaje de prueba trae las cuatro reacciones.
 
 ### ntfy
 Instala la app ntfy y suscríbete a un topic con un nombre **largo y aleatorio**, por ejemplo
@@ -325,7 +345,7 @@ Cada email se procesa una sola vez (se guarda el último UID en `state/runs.json
 los emails de los últimos 4–5 días. Los logs públicos solo muestran conteos
 (`email: 12 new messages … 30 jobs`).
 
-## 14. Tracker de candidaturas (Telegram)
+## 14. Tracker de candidaturas (Telegram o Discord)
 
 Cada oferta que llega en un mensaje individual (grupos con `format: per_job`, como
 `favorites` y `company_sites`) trae cuatro botones: **⭐ Interesa · ✅ Aplicado · 🗣 Entrevista ·
@@ -358,9 +378,14 @@ Cada oferta que llega en un mensaje individual (grupos con `format: per_job`, co
     (`tracker.follow_up_days`).
   - `/ayuda`: resumen de todo esto.
 - El bot solo hace caso al chat de `TELEGRAM_CHAT_ID`.
-- **Otros canales.** Discord no admite botones en mensajes enviados por webhook (ver
-  [DASHBOARDS.md](DASHBOARDS.md)). Email y ntfy tampoco llevan botones. En esos canales, el tracker
-  se lleva editando el CSV en la web.
+- **Discord (bot).** Con `DISCORD_BOT_TOKEN` y `DISCORD_CHANNEL_ID` (§5), cada oferta individual
+  lleva las reacciones ⭐ ✅ 🗣️ ❌ del bot. Reacciona con la que quieras. En la siguiente
+  sincronización se guarda en el CSV y el mensaje muestra `» ✅ Aplicado «` en la primera línea.
+  Se leen los mensajes de los últimos 60 días (hasta 200 por sincronización). Quitar y volver a
+  poner una reacción la procesa otra vez. Los comandos `/estado` y `/pendientes` son solo de
+  Telegram.
+- **Otros canales.** Un webhook de Discord (ver [DASHBOARDS.md](DASHBOARDS.md)), email y ntfy no
+  llevan botones. En esos canales, el tracker se lleva editando el CSV en la web.
 - **Desactivarlo:** `tracker: {enabled: false}` en la config.
 
 ## 15. Resumen semanal

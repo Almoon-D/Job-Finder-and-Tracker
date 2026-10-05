@@ -8,6 +8,7 @@ them.
 
 from __future__ import annotations
 
+import os
 import re
 from typing import Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -243,8 +244,18 @@ class TelegramConfig(_Model):
 
 
 class DiscordConfig(_Model):
+    """A webhook posts alerts; a bot (token + channel id) also adds ⭐✅🗣❌ reactions that feed the tracker."""
+
     enabled: bool = False
     webhook_env: str = "DISCORD_WEBHOOK_URL"
+    bot_token_env: str = "DISCORD_BOT_TOKEN"
+    channel_id_env: str = "DISCORD_CHANNEL_ID"
+
+    def bot_credentials(self) -> tuple[str, str] | None:
+        """(bot token, channel id) when both secrets are set: the bot (reactions + tracker) replaces the webhook."""
+        token = os.environ.get(self.bot_token_env, "").strip()
+        channel = os.environ.get(self.channel_id_env, "").strip()
+        return (token, channel) if token and channel else None
 
 
 class EmailConfig(_Model):
@@ -281,9 +292,9 @@ class NotifyConfig(_Model):
 
 
 class TrackerConfig(_Model):
-    """Application tracker: Telegram buttons on per-job messages, kept in tracker/applications.csv."""
+    """Application tracker: Telegram buttons / Discord reactions on per-job messages, kept in tracker/applications.csv."""
 
-    enabled: bool = Field(True, description="Buttons and sync (only when notify.telegram is enabled).")
+    enabled: bool = Field(True, description="Buttons and sync (only with notify.telegram or a Discord bot).")
     follow_up_days: int = Field(
         14, ge=1, description="/pendientes also lists applications without changes for this many days."
     )
