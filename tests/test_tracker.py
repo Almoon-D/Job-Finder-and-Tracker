@@ -219,6 +219,18 @@ async def test_status_and_pending_commands(tmp_path):
 
 
 @respx.mock
+async def test_commands_are_answered_in_the_topic_they_were_asked_in(tmp_path):
+    write_config(tmp_path)
+    in_topic = command(1, "/estado")
+    in_topic["message"].update({"is_topic_message": True, "message_thread_id": 7})
+    plain_reply = command(2, "/ayuda")  # a reply thread of a plain group also carries a thread id, but no flag
+    plain_reply["message"]["message_thread_id"] = 99
+    routes = mock_telegram([in_topic, plain_reply, command(3, "/ayuda")])
+    await tracker_sync(None, tmp_path, push=False, now=NOW)
+    assert [b.get("message_thread_id") for b in bodies(routes["send"])] == [7, None, None]
+
+
+@respx.mock
 async def test_webhook_conflict_removes_the_webhook(tmp_path, capsys):
     write_config(tmp_path)
     mock_telegram(updates_status=409)
@@ -580,3 +592,45 @@ async def test_discord_reactions_feed_the_tracker(tmp_path, discord_env):
     await tracker_sync(None, tmp_path, push=False, now=NOW + timedelta(hours=4))
     states = {r["id"]: r["estado"] for r in read_csv(tmp_path)}
     assert states[other] == "descartado" and states[JID] == "entrevista"
+
+
+@respx.mock
+async def test_discord_reaction_on_any_copy_of_an_offer_reaches_the_tracker(tmp_path, discord_env):
+    """With notify.routing one offer has a message in several channels: all of them are read, and a ✅ on the
+    copy that is not the newest still counts."""
+    discord_config(tmp_path)
+    seed = State(tmp_path)
+    seed.observe(Job("secret-corp", "1", "Product Manager DACH", "https://jobs.example.test/1", "Secret Corp",
+                     locations=["Berlin, Germany"]), NOW)
+    seed.save()
+    tracker = Tracker(tmp_path, "es", make_tz())
+    tracker.remember(JID, KEY, "discord:600", 9000000000000000001, TZ_DAY)  # the place chat
+    tracker.remember(JID, KEY, "discord:601", 9000000000000000002, TZ_DAY)  # the highlights chat: the newer copy
+    tracker.save(NOW)
+    quiet = [{"id": "9000000000000000002", "reactions": reactions(**{"✅": 0, "❌": 0})}]
+    pressed = [{"id": "9000000000000000001", "reactions": reactions(**{"✅": 1, "❌": 0})}]
+    first = respx.get(f"{DISCORD}/channels/600/messages").mock(return_value=httpx.Response(200, json=pressed))
+    second = respx.get(f"{DISCORD}/channels/601/messages").mock(return_value=httpx.Response(200, json=quiet))
+    assert await tracker_sync(None, tmp_path, push=False, now=NOW) == 0
+    assert first.call_count == second.call_count == 1  # each channel is read once, whatever DISCORD_CHANNEL_ID says
+    assert [(r["id"], r["estado"]) for r in read_csv(tmp_path)] == [(JID, "aplicado")]
+
+
+@respx.mock
+async def test_discord_one_unreadable_channel_does_not_hide_the_others(tmp_path, discord_env, capsys):
+    discord_config(tmp_path)
+    seed = State(tmp_path)
+    seed.observe(Job("secret-corp", "1", "Product Manager DACH", "https://jobs.example.test/1", "Secret Corp",
+                     locations=["Berlin, Germany"]), NOW)
+    seed.save()
+    tracker = Tracker(tmp_path, "es", make_tz())
+    tracker.remember(JID, KEY, "discord:600", 9000000000000000001, TZ_DAY)
+    tracker.remember(JID, KEY, "discord:601", 9000000000000000002, TZ_DAY)
+    tracker.save(NOW)
+    respx.get(f"{DISCORD}/channels/600/messages").mock(
+        return_value=httpx.Response(403, json={"message": "Missing Access"}))
+    respx.get(f"{DISCORD}/channels/601/messages").mock(return_value=httpx.Response(200, json=[
+        {"id": "9000000000000000002", "reactions": reactions(**{"✅": 1, "❌": 0})}]))
+    assert await tracker_sync(None, tmp_path, push=False, now=NOW) == 1  # reported as a failure...
+    assert [(r["id"], r["estado"]) for r in read_csv(tmp_path)] == [(JID, "aplicado")]  # ...but the reaction counted
+    assert "600" not in capsys.readouterr().err  # no channel ids in the public log

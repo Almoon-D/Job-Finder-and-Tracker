@@ -55,7 +55,7 @@ Repo público → **Settings → Secrets and variables → Actions**:
 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | Telegram |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `EMAIL_TO` | Email |
 | `DISCORD_WEBHOOK_URL` | Discord |
-| `DISCORD_BOT_TOKEN`, `DISCORD_CHANNEL_ID` | Discord con reacciones ✅ ❌ para el tracker, opcional (§14) |
+| `DISCORD_BOT_TOKEN`, `DISCORD_CHANNEL_ID` | Discord con reacciones ✅ ❌ para el tracker, y varios canales (§16), opcional (§14) |
 | `NTFY_TOPIC` (y `NTFY_TOKEN` si tu servidor lo pide) | ntfy |
 | `APPRISE_URLS` | Otros servicios vía Apprise (Slack, Gotify, Pushover…), separados por espacios |
 | `GEMINI_API_KEY`, `NVIDIA_API_KEY`, `GROQ_API_KEY` (también `OPENROUTER_API_KEY`, `CEREBRAS_API_KEY`, `MISTRAL_API_KEY`) | IA opcional (§6) |
@@ -108,6 +108,7 @@ herramienta ya ha leído los mensajes.
 ### Discord
 Canal → **Editar canal → Integraciones → Webhooks → Nuevo webhook** → *Copiar URL* →
 secret `DISCORD_WEBHOOK_URL`. Para marcar ofertas con ✅ ❌ desde Discord, ver el bot de reacciones (§14).
+Para repartir los avisos en varios canales (Resumen, un canal por lugar…), ver §16: necesita el bot.
 
 ### ntfy
 Instala la app ntfy y suscríbete a un topic con un nombre **largo y aleatorio**, por ejemplo
@@ -412,6 +413,8 @@ canales** un resumen de los 7 días anteriores:
 - Salud y rendimiento de cada fuente: cuántas funcionan, cuáles dan más coincidencias y cuáles
   tienen problemas.
 
+Con varios chats (§16) el resumen semanal va solo al chat de Resumen.
+
 El informe completo, con tablas por fuente, se guarda en `reports/weekly/AAAA-Www.md` del repo
 privado (por ejemplo `2026-W39.md`). Los números salen de `runs/stats.json`, que acumula cada
 ejecución. Las revisiones de favoritas que no encuentran nada nuevo no se guardan, así que no
@@ -424,3 +427,78 @@ groups:
     times: ["18:00"]
     weekdays: [sun]
 ```
+
+## 16. Varios chats: Resumen, un chat por lugar, Destacadas y Otros
+
+Por defecto todo llega a **un solo chat** por canal. Con `notify.routing` cada aviso se reparte
+en varios, para poder silenciar lo que no te interesa y ver cada mercado por separado:
+
+| Chat | Qué lleva |
+|---|---|
+| **Resumen** (`summary`) | Un índice compacto, una línea por oferta nueva, de **todas** ellas. Sin sonido. También lleva los avisos de salud de las fuentes y el resumen semanal (§15). |
+| **Un chat por lugar** (`places`) | Las ofertas de ese lugar, con el mismo formato que tenías (tarjetas con ✅ ❌, resumen agrupado…). Varios lugares pueden compartir chat. |
+| **⭐ Destacadas** (`highlights`) | Ofertas de fuentes `favorite: true` **o** con encaje IA igual o mayor que `highlight_score` (85 por defecto). Esa oferta **también** sale en el chat de su lugar. |
+| **Otros** (`other`) | Ofertas sin lugar propio (sin ubicación, ubicación no listada o «cobertura») y el chat de reserva. |
+
+Una oferta que sale en dos chats es **la misma oferta**: lleva el mismo identificador en el tracker.
+Un ✅ o ❌ en cualquiera de las copias actualiza la misma fila de `tracker/applications.csv`.
+
+```yaml
+notify:
+  discord: {enabled: true, bot: true}        # el reparto en Discord necesita el bot (§14)
+  telegram: {enabled: true}
+  routing:
+    summary: Resumen
+    highlights: Destacadas
+    highlight_score: 85
+    other: Otros
+    places:                                  # lugar tal como sale en los resúmenes -> nombre del chat
+      Germany: DACH
+      Austria: DACH
+      Lisbon: Lisboa
+```
+
+- **Los lugares** son los de `locations`: el `label` si lo tiene, si no la ciudad, si no el país
+  (en inglés, p. ej. `Germany`). Un lugar que no esté en `locations` da error al validar.
+  No crees un chat por cada lugar: con 3 a 6 que sigas de verdad basta, y el resto va a Otros.
+- **Todo opcional.** Un nombre sin poner significa «el chat de siempre»: `DISCORD_CHANNEL_ID`
+  en Discord y el tema General en Telegram. Sin `summary` no hay índice, y sin `other` lo
+  que sobra va al chat de siempre. Sin bloque `routing` nada cambia.
+
+**Discord (crea los canales solo).**
+
+1. Da al bot el permiso *Gestionar canales* (además de los de §14). Sin él, los chats
+   que falten caen en Otros y el log avisa.
+2. Pon `routing` en la config y lanza **Actions → jobfinder → `test-notify`** una vez: el bot busca
+   un canal con el mismo nombre (lo adopta) o lo crea junto al canal de `DISCORD_CHANNEL_ID`, en
+   su misma categoría, y manda un mensaje de prueba a cada uno.
+3. Opcional, en `notify.discord`: `category: Job Finder` (categoría para los canales nuevos),
+   `guild_id` (si no, el servidor de `DISCORD_CHANNEL_ID`) y `channels: {Lisboa: "123…"}` para
+   usar un canal que ya existe en vez de crear uno. Los ids no son secretos: van en `config.yaml`.
+4. Los nombres de canal los pone Discord en minúsculas y con guiones (`Destacadas` → `destacadas`).
+   Dos chats que acaben con el mismo nombre dan error al validar.
+
+**Telegram (crea los temas solo).**
+
+1. Convierte el grupo de `TELEGRAM_CHAT_ID` en un supergrupo con **Temas** activados, y haz admin al
+   bot con el permiso *Gestionar temas*.
+2. Lanza `test-notify`: el bot crea un tema por chat y manda una prueba a cada uno. En un grupo sin temas
+   avisa y todo sigue yendo a un solo chat.
+3. Opcional: `notify.telegram.topics: {Lisboa: 12}` para usar un tema que ya existe (`0` = General).
+   Telegram **no permite listar temas**: si algún día se pierde el estado (ver abajo), los temas
+   se crearían de nuevo. Escribe aquí los ids para evitarlo.
+4. Los comandos (`/estado`…) se responden en el tema donde los escribas.
+
+**Qué se guarda y qué pasa si algo falla**
+
+- Los ids de los chats creados se guardan en `state/runs.json` del repo privado (sección
+  `destinations`) y se commitean al momento. Si **borras un chat a mano**, borra también su línea
+  ahí o pon otro id en la config: mientras tanto sus ofertas van a Otros.
+- Si un chat rechaza su primer mensaje (borrado, sin permisos), esas ofertas van a Otros y el log
+  lo cuenta. Si falla a mitad, no se repiten en otro sitio. Con al menos un chat entregado, la
+  ejecución cuenta como entregada, y el índice de Resumen lleva todas las ofertas.
+- `test-notify` falla si **cualquier** chat falla; es para eso.
+- Los logs públicos de GitHub Actions solo muestran **cuántos** chats, nunca sus nombres ni ids.
+- Un aviso que cae a la vez en el chat de un lugar y en Destacadas lleva `⚡`/color de prioridad
+  alta solo en Destacadas.
+- Una oferta con varios lugares (p. ej. «Berlín / Viena») va al **primer** lugar que coincide.

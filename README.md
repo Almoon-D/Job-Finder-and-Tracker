@@ -57,7 +57,11 @@ looking for.
   🗣 Interview · ❌ Discard buttons. Presses are saved in `tracker/applications.csv` in the private
   repo, a file you can also edit on the GitHub website. `/status` and `/pending` commands. There is
   no server: the bot is polled at every run and by a `tracker-sync` run every 1–3 h.
-- **Weekly summary** to every channel, and saved as `reports/weekly/YYYY-Www.md`. It covers new jobs
+- **Separate chats** (optional): a Resumen index of every new offer, one chat per place, ⭐ Destacadas
+  (favourite sources or a high AI fit) and Otros, as Discord channels (bot) and/or Telegram topics. The bots
+  create them. One offer in two chats is still one offer for the tracker
+  (see [docs/SETUP.es.md](docs/SETUP.es.md) §16).
+- **Weekly summary** to every channel (to the Resumen chat when chats are separated), and saved as `reports/weekly/YYYY-Www.md`. It covers new jobs
   per group, company and role family, matches against discards, the tracker funnel, and source health.
 - **Private feeds** (JSON Feed 1.1, RSS, summary and tracker JSON) for dashboards. Tested examples for
   Glance and Homepage are in [docs/DASHBOARDS.md](docs/DASHBOARDS.md).

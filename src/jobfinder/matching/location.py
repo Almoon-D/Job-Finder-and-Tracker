@@ -97,6 +97,12 @@ def resolve_country(value: str | None) -> str | None:
     return None
 
 
+def display_name(spec: LocationSpec) -> str:
+    """Name of a configured place as shown in digests and used to route it: label, city or country name."""
+    iso2 = resolve_country(spec.country) if spec.country else None
+    return spec.label or spec.city or (country_name(iso2) if iso2 else spec.country or "")
+
+
 def _latin(text: str) -> bool:
     return bool(text) and all(ord(ch) < 0x250 for ch in text)
 
@@ -188,8 +194,7 @@ class LocationMatcher:
                 names = city_aliases(spec.city, iso2) | {normalize_text(a) for a in spec.aliases}
             elif spec.aliases and iso2:
                 country_aliases()[iso2].update(normalize_text(a) for a in spec.aliases)
-            display = spec.label or spec.city or (country_name(iso2) if iso2 else spec.country or "")
-            self.targets.append(_Target(iso2, names, spec.include_remote, spec.city, display))
+            self.targets.append(_Target(iso2, names, spec.include_remote, spec.city, display_name(spec)))
             models.PLACE_WORDS.update(names)
         models.PLACE_WORDS.update(n for names in country_aliases().values() for n in names)
         self._target_cache: dict[str, _Target | None] = {}

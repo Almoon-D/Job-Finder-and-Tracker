@@ -7,15 +7,17 @@ from ..config.schema import Config
 from ..sources.http import Http, HttpError
 from .base import ChannelError, Notification
 from .channels import ALL_CHANNELS, env
+from .destinations import Destinations
 
 
-async def send_all(config: Config, http: Http, n: Notification) -> tuple[int, int]:
-    """Returns (channels attempted, channels that succeeded)."""
+async def send_all(config: Config, http: Http, n: Notification,
+                   destinations: Destinations | None = None) -> tuple[int, int]:
+    """Returns (channels attempted, channels that succeeded). ``destinations`` turns on ``notify.routing``."""
     attempted = succeeded = 0
     if not any(cls(config, http).enabled() for cls in ALL_CHANNELS):
         log.warn("notify: no channel is enabled in config.yaml (set e.g. `notify: {telegram: {enabled: true}}`)")
     for cls in ALL_CHANNELS:
-        channel = cls(config, http)
+        channel = cls(config, http, destinations)
         if not channel.enabled():
             continue
         attempted += 1
@@ -51,5 +53,16 @@ def credentials_checklist(config: Config) -> list[str]:
         ("ntfy", n.ntfy.enabled, have(n.ntfy.topic_env)),
         ("apprise", n.apprise.enabled, have(n.apprise.urls_env)),
     ]
-    return [f"  {name}: {'enabled' if on else 'disabled in config.yaml'}" + (f" ({secrets})" if on else "")
-            for name, on, secrets in lines]
+    out = [f"  {name}: {'enabled' if on else 'disabled in config.yaml'}" + (f" ({secrets})" if on else "")
+           for name, on, secrets in lines]
+    r = n.routing
+    if r.active:  # counts only: chat names are private
+        notes = []
+        if n.discord.enabled and not n.discord.bot:
+            notes.append("discord needs `bot: true` to choose channels (webhooks cannot): it sends to the one channel")
+        out.append(f"  routing: {len(r.routes())} chats (ids in the config: {len(n.discord.channels)} Discord "
+                   f"channel(s), {len(n.telegram.topics)} Telegram topic(s); the bots create the rest)"
+                   + "".join(f"; {note}" for note in notes))
+    else:
+        out.append("  routing: not set up (one chat per channel)")
+    return out

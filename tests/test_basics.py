@@ -158,6 +158,43 @@ def test_config_cross_checks():
         _parse("groups: {g: {times: ['09:00']}}\nsources: [{name: a, group: g}]", "t")
 
 
+ROUTING = "locations: [{country: DE}, {city: Lisbon, country: PT}]\nnotify: {routing: %s}"
+
+
+def test_routing_config_normalises_names_and_lists_each_chat_once():
+    cfg = _parse(ROUTING % "{summary: ' Resumen ', other: '', places: {Germany: DACH, Lisbon: DACH}}", "t")
+    routing = cfg.notify.routing
+    assert routing.active and routing.summary == "Resumen" and routing.other is None
+    assert routing.routes() == ["Resumen", "DACH"]
+    assert not make_config().notify.routing.active  # nothing set: nothing changes
+
+
+@pytest.mark.parametrize(
+    "routing",
+    [
+        "{places: {Spain: Madrid}}",                      # not one of the configured locations
+        "{summary: 'A b', other: 'a-b'}",                 # the same Discord channel name
+        "{summary: '???'}",                               # no channel name left
+        "{places: {Germany: ''}}",
+    ],
+)
+def test_routing_config_errors_name_nothing(routing):
+    with pytest.raises(ConfigError) as err:
+        _parse(ROUTING % routing, "t")
+    for private in ("Spain", "Madrid", "Germany", "A b"):
+        assert private not in err.value.public
+
+
+def test_routing_ids_need_a_chat_that_routing_defines():
+    ok = _parse("locations: [{country: DE}]\nnotify:\n  routing: {summary: S}\n  discord: {channels: {S: 123}}\n"
+                "  telegram: {topics: {S: 0}}", "t")
+    assert ok.notify.discord.channels == {"S": "123"} and ok.notify.telegram.topics == {"S": 0}
+    for notify in ("discord: {channels: {Other: 123}}", "telegram: {topics: {Other: 4}}",
+                   "discord: {channels: {S: abc}}", "telegram: {topics: {S: -1}}"):
+        with pytest.raises(ConfigError):
+            _parse(f"locations: [{{country: DE}}]\nnotify: {{routing: {{summary: S}}, {notify}}}", "t")
+
+
 def test_example_config_is_valid():
     from pathlib import Path
 

@@ -5,12 +5,18 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
+from functools import cached_property
+from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
 from ..config.schema import Config
 from ..i18n import t, when
 from ..models import Job
 from ..sources.http import Http
+
+if TYPE_CHECKING:
+    from .destinations import Destinations
+    from .routing import Router
 
 
 class ChannelError(Exception):
@@ -49,6 +55,8 @@ class Notification:
     sent: list[tuple[str, str, str, int]] = field(default_factory=list)  # (job id, job key, chat, message id)
     layouts: list[tuple[str, int, list[str], int]] = field(default_factory=list)  # grouped: chat, message, jids, start
     report: Report | None = None
+    silent: bool = False  # delivered without a sound (the Resumen index: every offer already rings in its own chat)
+    show_sources: bool = True  # the "sources: n/m" footer line (only the chat that carries the health report)
 
     @property
     def empty(self) -> bool:
@@ -156,9 +164,16 @@ class Notification:
 class Channel(ABC):
     name: str
 
-    def __init__(self, config: Config, http: Http):
+    def __init__(self, config: Config, http: Http, destinations: Destinations | None = None):
         self.config = config
         self.http = http
+        self.destinations = destinations  # None: never routed (one chat), whatever notify.routing says
+
+    @cached_property
+    def router(self) -> Router:
+        from .routing import Router  # routing.py imports this module
+
+        return Router(self.config)
 
     @abstractmethod
     def enabled(self) -> bool: ...

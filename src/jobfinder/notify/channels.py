@@ -19,6 +19,7 @@ from ..i18n import t
 from ..sources.http import HttpError
 from ..tracker.buttons import GROUP_BUTTONS, GROUP_ROWS, TEST_ID, grouped_keyboard, job_id, keyboard
 from .base import Channel, ChannelError, Notification
+from .routing import Plan, deliver_plans
 
 
 def env(name: str) -> str:
@@ -60,7 +61,7 @@ def chunk(parts: list[str], limit: int, sep: str = "\n\n") -> list[str]:
 def footer_lines(n: Notification) -> list[str]:
     if n.report is not None:
         return list(n.report.footer)
-    lines = [n.sources_line]
+    lines = [n.sources_line] if n.show_sources else []
     if n.also_elsewhere:
         lines.insert(0, t(n.lang, "elsewhere", n=n.also_elsewhere))
     if n.hidden_count:
@@ -74,6 +75,7 @@ def footer_lines(n: Notification) -> list[str]:
 class Telegram(Channel):
     name = "telegram"
     LIMIT = 4000
+    posted = 0  # messages delivered so far: a chat that fails before its first one can be replaced by another
 
     def enabled(self) -> bool:
         return self.config.notify.telegram.enabled
@@ -136,17 +138,22 @@ class Telegram(Channel):
         assert n.report is not None
         return [f"<b>{e(heading)}</b>\n" + "\n".join(e(line) for line in lines) for heading, lines in n.report.sections]
 
-    async def _send(self, token: str, chat: str, text: str, silent: bool, markup: dict | None = None) -> dict:
-        """Send one message; returns Telegram's ``result`` (the sent message) or {}."""
+    async def _send(self, token: str, chat: str, text: str, silent: bool, markup: dict | None = None,
+                    thread: int | None = None) -> dict:
+        """Send one message (to a topic of the group when ``thread`` is set); returns Telegram's ``result`` (the
+        sent message) or {}."""
         cfg = self.config.notify.telegram
         payload = {"chat_id": chat, "text": text, "parse_mode": "HTML",
                    "disable_web_page_preview": cfg.disable_preview, "disable_notification": silent}
         if markup:
             payload["reply_markup"] = markup
+        if thread:  # the General topic has no thread id
+            payload["message_thread_id"] = thread
         try:
             data = await self.http.post_json(f"https://api.telegram.org/bot{token}/sendMessage", json=payload)
         except HttpError as exc:
             raise ChannelError(api_reason(exc)) from exc
+        self.posted += 1
         result = data.get("result") if isinstance(data, dict) else None
         return result if isinstance(result, dict) else {}
 
@@ -155,34 +162,53 @@ class Telegram(Channel):
         token, chat = env(cfg.bot_token_env), env(cfg.chat_id_env)
         if not token or not chat:
             raise ChannelError(f"missing {cfg.bot_token_env} or {cfg.chat_id_env}")
+        dest = self.destinations
+        if dest is None or not self.router.active or not await dest.telegram_ready():
+            await self._deliver(n, token, chat)
+            return
+
+        async def one(plan: Plan) -> None:
+            thread, before = await dest.telegram_topic(plan.route), self.posted
+            try:
+                await self._deliver(plan.notification, token, chat, thread)
+            except ChannelError:
+                catch_all = await dest.telegram_topic(self.config.notify.routing.other)
+                if self.posted != before or catch_all == thread or n.test:
+                    raise
+                log.warn("notify/telegram: a topic refused the message; sent to the catch-all one")
+                await self._deliver(plan.notification, token, chat, catch_all)
+
+        await deliver_plans("telegram", self.router.plan(n), one, test=n.test, pause=1.1)
+
+    async def _deliver(self, n: Notification, token: str, chat: str, thread: int | None = None) -> None:
         header = f"<b>{html.escape(n.title)}</b>"
         footer = "\n".join(html.escape(x) for x in footer_lines(n))
-        silent = n.empty and n.priority != "high"
+        silent = n.silent or (n.empty and n.priority != "high")
         if n.test:
             text, markup = f"{header}\n{html.escape(t(n.lang, 'test_body'))}", None
             if n.buttons:  # the tracker's buttons, to try the whole loop (press → sync → marked)
                 text += f"\n\n{html.escape(t(n.lang, 'test_buttons'))}"
                 markup = keyboard(TEST_ID, None, n.lang)
-            await self._send(token, chat, text, False, markup)
+            await self._send(token, chat, text, False, markup, thread=thread)
             return
         if n.report is not None:
             for i, text in enumerate(chunk([p for p in (header, *self._report_parts(n), footer) if p], self.LIMIT)):
                 if i:
                     await asyncio.sleep(1.1)
-                await self._send(token, chat, text, False)
+                await self._send(token, chat, text, False, thread=thread)
             return
         if n.format == "per_job" and not n.empty:
-            await self._send(token, chat, header, False)
+            await self._send(token, chat, header, False, thread=thread)
             for job in n.shown:
                 await asyncio.sleep(1.1)  # Telegram allows ~1 message/second per chat
                 jid = job_id(job.key) if n.buttons and job.kind == "job" else None
                 markup = keyboard(jid, n.tracker_status.get(jid), n.lang) if jid else None
-                sent = await self._send(token, chat, self._job_html(n, job), False, markup)
+                sent = await self._send(token, chat, self._job_html(n, job), False, markup, thread=thread)
                 if jid and sent.get("message_id"):
                     sent_chat = str((sent.get("chat") or {}).get("id") or chat)
                     n.sent.append((jid, job.key, sent_chat, int(sent["message_id"])))
             if n.hidden_count or n.problems:
-                await self._send(token, chat, footer, True)
+                await self._send(token, chat, footer, True, thread=thread)
             return
         if n.format == "grouped" and not n.empty and n.buttons and any(j.kind == "job" for j in n.shown):
             head = f"{header}\n{html.escape(t(n.lang, 'btn_hint'))}"
@@ -191,7 +217,7 @@ class Telegram(Channel):
                     await asyncio.sleep(1.1)
                 jids = [job_id(j.key) for j, _ in jobs]
                 markup = grouped_keyboard(jids, n.tracker_status, jobs[0][1]) if jobs else None
-                sent = await self._send(token, chat, text, silent, markup)
+                sent = await self._send(token, chat, text, silent, markup, thread=thread)
                 if markup and sent.get("message_id"):
                     sent_chat, mid = str((sent.get("chat") or {}).get("id") or chat), int(sent["message_id"])
                     n.layouts.append((sent_chat, mid, jids, jobs[0][1]))
@@ -204,7 +230,7 @@ class Telegram(Channel):
         for i, text in enumerate(messages):
             if i:
                 await asyncio.sleep(1.1)
-            await self._send(token, chat, text, silent)
+            await self._send(token, chat, text, silent, thread=thread)
 
 
 # ---------------------------------------------------------------------- Discord
@@ -231,6 +257,8 @@ def pack_embeds(embeds: list[dict], max_embeds: int = 10, max_chars: int = 6000)
 class Discord(Channel):
     name = "discord"
     DESCRIPTION = 4096
+    SILENT = 4096  # message flag: delivered without a notification
+    posted = 0  # messages delivered so far: a chat that fails before its first one can be replaced by another
 
     def enabled(self) -> bool:
         return self.config.notify.discord.enabled
@@ -247,12 +275,14 @@ class Discord(Channel):
     API = "https://discord.com/api/v10"
     REACTIONS = tuple(icon for _, icon in GROUP_BUTTONS)
 
-    def _bot_credentials(self, n: Notification) -> tuple[str, str] | None:
-        """(token, channel id) when this alert should go out through the bot, with ✅ ❌ reactions."""
+    def _bot_credentials(self, n: Notification, channel: str | None = None) -> tuple[str, str] | None:
+        """(token, channel id) when this alert should go out through the bot, with ✅ ❌ reactions.
+
+        ``channel``: the chat a routed notification goes to (default: DISCORD_CHANNEL_ID)."""
         cfg = self.config.notify.discord
         if not (cfg.bot and n.buttons and n.jobs and n.report is None and not n.test):
             return None
-        token, channel = env(cfg.bot_token_env), env(cfg.channel_id_env)
+        token, channel = env(cfg.bot_token_env), channel or env(cfg.channel_id_env)
         if token and channel:
             return token, channel
         log.warn(f"notify/discord: missing {cfg.bot_token_env} or {cfg.channel_id_env}; sending the webhook digest")
@@ -260,10 +290,12 @@ class Discord(Channel):
 
     async def _bot(self, method: str, token: str, path: str, **kwargs):
         try:
-            return await self.http.request(method, f"{self.API}{path}", headers={"Authorization": f"Bot {token}"},
+            resp = await self.http.request(method, f"{self.API}{path}", headers={"Authorization": f"Bot {token}"},
                                            **kwargs)
         except HttpError as exc:
             raise ChannelError(f"Discord bot: {api_reason(exc)}") from exc
+        self.posted += 1
+        return resp
 
     async def _send_bot(self, n: Notification, token: str, channel: str, color: int) -> None:
         """One message per job (an embed) with ✅ ❌ already added; the tracker reads the reactions."""
@@ -297,16 +329,51 @@ class Discord(Channel):
             await self._bot("POST", token, f"/channels/{channel}/messages", json={"content": footer})
 
     async def send(self, n: Notification) -> None:
-        bot = self._bot_credentials(n)
-        if bot:
-            await self._send_bot(n, *bot, 0xF5A623 if n.priority == "high" else 0x2F80ED)
+        dest = self.destinations
+        if dest is not None and self.router.active and dest.discord_ready:
+            token = env(self.config.notify.discord.bot_token_env)
+
+            async def one(plan: Plan) -> None:
+                channel, before = await dest.discord_channel(plan.route), self.posted
+                try:
+                    await self._deliver(plan.notification, channel, token)
+                except ChannelError:
+                    catch_all = await dest.discord_channel(self.config.notify.routing.other)
+                    if self.posted != before or catch_all == channel or n.test:
+                        raise
+                    log.warn("notify/discord: a channel refused the message; sent to the catch-all one")
+                    await self._deliver(plan.notification, catch_all, token)
+
+            await deliver_plans("discord", self.router.plan(n), one, test=n.test)
             return
-        url = env(self.config.notify.discord.webhook_env)
-        if not url:
-            raise ChannelError(f"missing {self.config.notify.discord.webhook_env}")
+        await self._deliver(n)
+
+    async def _deliver(self, n: Notification, channel: str | None = None, token: str = "") -> None:
+        """One notification to one chat. ``channel``: a routed chat, always through the bot. Without it: the bot's
+        chat when it can carry reactions, else the webhook."""
         color = 0xF5A623 if n.priority == "high" else 0x2F80ED
+        bot = self._bot_credentials(n, channel)
+        if bot:
+            await self._send_bot(n, *bot, color)
+            return
+        if channel:
+
+            async def post(payload: dict) -> None:
+                await self._bot("POST", token, f"/channels/{channel}/messages", json=payload)
+        else:
+            url = env(self.config.notify.discord.webhook_env)
+            if not url:
+                raise ChannelError(f"missing {self.config.notify.discord.webhook_env}")
+
+            async def post(payload: dict) -> None:
+                await self.http.request("POST", url, json=payload)
+
+        await self._send_embeds(n, color, post)
+
+    async def _send_embeds(self, n: Notification, color: int, post) -> None:
+        flags = {"flags": self.SILENT} if n.silent else {}
         if n.test:
-            await self.http.request("POST", url, json={"content": f"**{n.title}**\n{t(n.lang, 'test_body')}"})
+            await post({"content": f"**{n.title}**\n{t(n.lang, 'test_body')}"})
             return
         if n.report is not None:
             embeds = [{"title": heading[:256], "description": ("\n".join(lines) or "—")[: self.DESCRIPTION],
@@ -326,16 +393,16 @@ class Discord(Channel):
         content = f"**{n.title}**"
         footer = "\n".join(footer_lines(n))[:2048]
         if not embeds:
-            await self.http.request("POST", url, json={"content": f"{content}\n{footer}"[:2000]})
+            await post({"content": "\n".join(x for x in (content, footer) if x)[:2000], **flags})
             return
-        embeds[-1]["footer"] = {"text": footer}
+        if footer:  # a routed chat can have none, and Discord rejects an embed footer without text
+            embeds[-1]["footer"] = {"text": footer}
         for i, batch in enumerate(pack_embeds(embeds)):
-            payload: dict = {"embeds": batch}
+            payload: dict = {"embeds": batch, **flags}
             if i == 0:
                 payload["content"] = content[:2000]
-            await self.http.request("POST", url, json=payload)
+            await post(payload)
             await asyncio.sleep(0.6)
-
 
 # ------------------------------------------------------------------------ Email
 _TEMPLATES = Environment(

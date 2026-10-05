@@ -9,7 +9,7 @@ nothing about what its owner is looking for.
 |---|---|---|
 | Code, workflows, docs, example config | Public repo | Everyone |
 | `config.yaml`: companies, roles, locations, schedules, profile | Private data repo | You |
-| `state/`: every job seen, notifications, AI verdicts, source health | Private data repo | You |
+| `state/`: every job seen, notifications, AI verdicts, source health, and (with `notify.routing`) the ids of the Discord channels and Telegram topics the bots created | Private data repo | You |
 | `runs/last_run.json`, `runs/config_error.txt`: run details and errors | Private data repo | You |
 | `runs/stats.json`: daily counts per group and source (for the weekly summary) | Private data repo | You |
 | `tracker/applications.csv`: jobs you marked, status, dates, notes, history | Private data repo | You |
@@ -40,6 +40,9 @@ never contain values from the config or from job postings.**
   changed`). Button data, commands and message text never appear. The bot only obeys the chat in
   `TELEGRAM_CHAT_ID`: presses and commands from any other chat are ignored.
 - The weekly summary logs only its number of new jobs.
+- With `notify.routing` the logs hold counts of chats and the API's own error reason, never a chat name or
+  an id. A test (`tests/test_routed_send.py::test_a_run_creates_the_chats_routes_the_offers_and_logs_nothing_private`)
+  fails if a chat name, channel id or offer text appears in a CI-mode run.
 - A test (`tests/test_pipeline.py::test_ci_logs_are_redacted`) runs the pipeline, a tracker
   sync and a weekly summary in CI mode with `--verbose`. It fails if a company name, title,
   location, URL, group name, bot token or Telegram message appears in the output.

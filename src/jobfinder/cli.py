@@ -53,8 +53,9 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("validate-config", help="validate the config")
     _common(p)
 
-    p = sub.add_parser("test-notify", help="send a test message to every enabled channel")
+    p = sub.add_parser("test-notify", help="send a test message to every enabled channel (and every routed chat)")
     _common(p)
+    p.add_argument("--no-push", action="store_true", help="save the chats the bots create locally but do not push")
 
     p = sub.add_parser("test-ai", help="send one tiny request to every AI provider that has a key")
     _common(p)
@@ -104,7 +105,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.cmd == "test-notify":
             from .app import test_notify
 
-            return asyncio.run(test_notify(args.config, data_dir))
+            return asyncio.run(test_notify(args.config, data_dir, push=not args.no_push))
         if args.cmd == "test-ai":
             from .app import test_ai
 

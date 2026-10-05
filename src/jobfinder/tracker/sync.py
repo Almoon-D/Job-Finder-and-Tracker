@@ -169,8 +169,11 @@ class TelegramSync:
         for i, part in enumerate(chunk(body.split("\n\n"), 4000)):
             if i:
                 await asyncio.sleep(1.1)
-            await self._quiet("sendMessage", {"chat_id": message["chat"]["id"], "text": part, "parse_mode": "HTML",
-                                              "disable_web_page_preview": True})
+            reply = {"chat_id": message["chat"]["id"], "text": part, "parse_mode": "HTML",
+                     "disable_web_page_preview": True}
+            if message.get("is_topic_message") and message.get("message_thread_id"):
+                reply["message_thread_id"] = message["message_thread_id"]  # answer in the topic that was asked
+            await self._quiet("sendMessage", reply)
 
     # ------------------------------------------------------------ replies
     def _line(self, row: dict[str, str], suffix: str = "") -> str:

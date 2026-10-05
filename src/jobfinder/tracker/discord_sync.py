@@ -3,7 +3,9 @@
 Discord webhooks can neither carry buttons nor read reactions, so with ``notify.discord.bot`` the bot
 posts one message per job (see ``notify.channels.Discord``) and this sync polls the channel history
 (one request returns 100 messages with their reaction counts) at the start of every normal run and
-from ``jobfinder tracker-sync``. Logs show counts only.
+from ``jobfinder tracker-sync``. With ``notify.routing`` the same offer can have a message in several
+channels: every channel that holds a tracked message is read, and a reaction on any copy updates the one
+tracker row. Logs show counts only.
 """
 
 from __future__ import annotations
@@ -28,17 +30,17 @@ class DiscordSync:
     def __init__(self, config: Config, http: Http, tracker: Tracker, state: State, now: datetime):
         self.http, self.tracker, self.state, self.now = http, tracker, state, now
         cfg = config.notify.discord
-        self.token, self.channel = env(cfg.bot_token_env), env(cfg.channel_id_env)
+        self.token = env(cfg.bot_token_env)
         self.today = tracker.today(now).isoformat()
         self.since = (tracker.today(now) - timedelta(days=WINDOW_DAYS)).isoformat()
         self.result = SyncResult()
 
-    async def _history(self, wanted: set[int]) -> dict[int, dict]:
-        """The tracked messages found in the channel history, newest first, until the oldest one is reached."""
+    async def _history(self, channel: str, wanted: set[int]) -> dict[int, dict]:
+        """The tracked messages found in a channel's history, newest first, until the oldest one is reached."""
         found: dict[int, dict] = {}
         before = ""
         for _ in range(MAX_PAGES):
-            path = f"/channels/{self.channel}/messages?limit=100" + (f"&before={before}" if before else "")
+            path = f"/channels/{channel}/messages?limit=100" + (f"&before={before}" if before else "")
             resp = await self.http.request("GET", f"{Discord.API}{path}",
                                            headers={"Authorization": f"Bot {self.token}"})
             page = resp.json()
@@ -77,22 +79,25 @@ class DiscordSync:
         return self.tracker.apply(TrackerOp(jid, target, self.today, info))
 
     async def run(self) -> SyncResult:
-        if not self.token or not self.channel:
+        if not self.token:
             log.info("tracker: Discord bot credentials missing; reaction sync skipped")
             return self.result
         refs = self.tracker.discord_refs(self.since)
         if not refs:
             return self.result
         self.tracker.detect_manual(self.today)
-        try:
-            history = await self._history({mid for _, _, mid in refs})
-        except HttpError as exc:
-            log.warn(f"tracker: Discord history failed (HTTP {exc.status})")
-            self.result.failed = True
-            return self.result
-        by_job = {jid: (channel, mid) for jid, channel, mid in refs}
-        for jid, (channel, mid) in by_job.items():
-            message = history.get(mid)
+        wanted: dict[str, set[int]] = {}
+        for _, channel, mid in refs:
+            wanted.setdefault(channel, set()).add(mid)
+        history: dict[tuple[str, int], dict] = {}
+        for channel, mids in wanted.items():  # one channel failing must not hide the reactions of the others
+            try:
+                history.update({(channel, mid): m for mid, m in (await self._history(channel, mids)).items()})
+            except HttpError as exc:
+                log.warn(f"tracker: Discord history failed (HTTP {exc.status})")
+                self.result.failed = True
+        for jid, channel, mid in refs:  # every copy of an offer counts, in whichever channel it was posted
+            message = history.get((channel, mid))
             if message is None:
                 continue
             seen = self._humans(message)
