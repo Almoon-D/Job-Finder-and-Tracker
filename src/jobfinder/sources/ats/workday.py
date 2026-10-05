@@ -74,7 +74,7 @@ class Workday(Adapter):
             if not param or not re.search(r"location|country|region", param, re.I):
                 continue
             seen_location_param = True
-            if matcher.match_location(desc):
+            if matcher.match_location(desc) or matcher.is_country_of_target(desc):
                 by_param.setdefault(param, []).append((vid, count))
         if not seen_location_param:
             return None

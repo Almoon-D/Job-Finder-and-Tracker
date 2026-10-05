@@ -55,6 +55,7 @@ Repo público → **Settings → Secrets and variables → Actions**:
 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | Telegram |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `EMAIL_TO` | Email |
 | `DISCORD_WEBHOOK_URL` | Discord |
+| `DISCORD_BOT_TOKEN`, `DISCORD_CHANNEL_ID` | Discord con reacciones ✅ ❌ para el tracker, opcional (§14) |
 | `NTFY_TOPIC` (y `NTFY_TOKEN` si tu servidor lo pide) | ntfy |
 | `APPRISE_URLS` | Otros servicios vía Apprise (Slack, Gotify, Pushover…), separados por espacios |
 | `GEMINI_API_KEY`, `NVIDIA_API_KEY`, `GROQ_API_KEY` (también `OPENROUTER_API_KEY`, `CEREBRAS_API_KEY`, `MISTRAL_API_KEY`) | IA opcional (§6) |
@@ -95,7 +96,7 @@ esa URL de `getUpdates` salga vacía: la herramienta ya ha leído los mensajes.
 
 ### Discord
 Canal → **Editar canal → Integraciones → Webhooks → Nuevo webhook** → *Copiar URL* →
-secret `DISCORD_WEBHOOK_URL`.
+secret `DISCORD_WEBHOOK_URL`. Para marcar ofertas con ✅ ❌ desde Discord, ver el bot de reacciones (§14).
 
 ### ntfy
 Instala la app ntfy y suscríbete a un topic con un nombre **largo y aleatorio**, por ejemplo
@@ -325,11 +326,36 @@ Cada email se procesa una sola vez (se guarda el último UID en `state/runs.json
 los emails de los últimos 4–5 días. Los logs públicos solo muestran conteos
 (`email: 12 new messages … 30 jobs`).
 
-## 14. Tracker de candidaturas (Telegram)
+## 14. Tracker de candidaturas (Telegram y Discord)
 
 Cada oferta que llega en un mensaje individual (grupos con `format: per_job`, como
 `favorites` y `company_sites`) trae cuatro botones: **⭐ Interesa · ✅ Aplicado · 🗣 Entrevista ·
 ❌ Descartar**.
+
+En los resúmenes agrupados (`format: grouped`, como `boards` y `recruiters`), la lista sale
+numerada y el mensaje lleva **una fila `N ✅  N ❌` por oferta**: ✅ = aplicado, ❌ = no me interesa.
+No pulsar nada deja la oferta sin marcar. El ❌ es también la señal que sirve para afinar filtros
+y prompt de la IA.
+
+**Discord con reacciones.** Los webhooks no admiten botones, pero sí se pueden leer reacciones:
+
+1. Crea una aplicación en <https://discord.com/developers/applications>, añade un bot y copia
+   su token. No hace falta ningún intent privilegiado.
+2. Invítalo al servidor con los permisos *Ver canal*, *Enviar mensajes*, *Insertar enlaces*,
+   *Añadir reacciones* y *Leer el historial de mensajes*.
+3. Activa el modo desarrollador de Discord, pulsa con el botón derecho en el canal y copia su id.
+4. Crea los secrets `DISCORD_BOT_TOKEN` y `DISCORD_CHANNEL_ID` en el repo público y pon en la
+   config `notify: {discord: {enabled: true, bot: true}}`.
+
+Con eso, cada oferta llega en su propio mensaje con ✅ y ❌ ya puestos: pulsa uno. La
+sincronización (`tracker-sync` o cada ejecución normal) lee el historial del canal, que trae las
+reacciones de 100 mensajes por petición, y actualiza el CSV.
+
+- Solo se leen mensajes de los últimos 14 días.
+- Una reacción solo se aplica cuando cambia. Si editas el estado a mano en el CSV, la sync no lo
+  deshace, y una reacción nunca baja una oferta que ya está en entrevista, oferta o rechazada.
+- Si pones ✅ y ❌ a la vez, gana la que no coincide con el estado actual.
+- Sin las credenciales del bot, el aviso vuelve al resumen normal por webhook.
 
 - **Cuándo se procesan.** GitHub Actions no puede recibir los clics al momento, porque no hay
   servidor. La herramienta los lee al empezar cada ejecución normal: favoritas cada 10 minutos,
@@ -358,8 +384,8 @@ Cada oferta que llega en un mensaje individual (grupos con `format: per_job`, co
     (`tracker.follow_up_days`).
   - `/ayuda`: resumen de todo esto.
 - El bot solo hace caso al chat de `TELEGRAM_CHAT_ID`.
-- **Otros canales.** Discord no admite botones en mensajes enviados por webhook (ver
-  [DASHBOARDS.md](DASHBOARDS.md)). Email y ntfy tampoco llevan botones. En esos canales, el tracker
+- **Otros canales.** Discord por webhook no admite botones (usa el bot con reacciones de arriba;
+  ver [DASHBOARDS.md](DASHBOARDS.md)). Email y ntfy tampoco llevan botones. En esos canales, el tracker
   se lleva editando el CSV en la web.
 - **Desactivarlo:** `tracker: {enabled: false}` en la config.
 

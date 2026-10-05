@@ -337,3 +337,182 @@ async def test_polling_run_saves_tracker_changes_only(tmp_path):
     await run(None, tmp_path, groups=["favorites"], now=NOW)
     assert routes["updates"].call_count == 1
     assert read_csv(tmp_path)[0]["estado"] == "descartado"
+
+
+# ------------------------------------------------------- grouped digests (✅ ❌)
+def _grouped_note(count: int, **kwargs):
+    from jobfinder.notify.base import Notification
+
+    from .test_notify_state import TZ, _jobs
+
+    return Notification("boards", "Portales", _jobs(count), "es", TZ, NOW, format="grouped", buttons=True,
+                        max_items=count, **kwargs)
+
+
+def test_grouped_keyboard_has_one_numbered_row_per_job():
+    from jobfinder.tracker import grouped_keyboard
+
+    jids = [job_id(f"s:{i}") for i in range(3)]
+    rows = grouped_keyboard(jids, {jids[1]: "applied", jids[2]: "discarded"}, start=8)["inline_keyboard"]
+    assert [[b["text"] for b in row] for row in rows] == [
+        ["8 ✅", "8 ❌"], ["» 9 ✅ «", "9 ❌"], ["10 ✅", "» 10 ❌ «"]]
+    assert [parse_callback(b["callback_data"]) for b in rows[1]] == [("applied", jids[1]), ("discarded", jids[1])]
+
+
+@respx.mock
+async def test_grouped_digest_carries_numbered_buttons_and_layouts():
+    from jobfinder.config.schema import Config  # noqa: F401
+    from jobfinder.notify.channels import Telegram
+    from jobfinder.sources.http import Http
+
+    from .conftest import make_config
+
+    counter = iter(range(300, 400))
+    route = respx.post(f"{BASE}/sendMessage").mock(side_effect=lambda request: httpx.Response(
+        200, json={"ok": True, "result": {"message_id": next(counter), "chat": {"id": 42}}}))
+    n = _grouped_note(60)
+    async with Http() as http:
+        await Telegram(make_config(notify={"telegram": {"enabled": True}}), http).send(n)
+    sent = bodies(route)
+    assert len(sent) > 1 and all(len(p["text"]) <= 4000 for p in sent)
+    assert "Pulsa ✅" in sent[0]["text"]
+    rows = sum(len(p.get("reply_markup", {}).get("inline_keyboard", [])) for p in sent)
+    assert rows == 60 and all(len(p["reply_markup"]["inline_keyboard"]) <= 45 for p in sent if "reply_markup" in p)
+    # every row's number matches the numbered line of the same message, in order
+    first = sent[0]
+    assert "1. <a" in first["text"] and first["reply_markup"]["inline_keyboard"][0][0]["text"] == "1 ✅"
+    assert len(n.sent) == 60 and sum(len(jids) for _, _, jids, _ in n.layouts) == 60
+    assert n.layouts[0][3] == 1 and n.layouts[1][3] == 1 + len(n.layouts[0][2])
+
+
+@respx.mock
+async def test_pressing_a_grouped_button_keeps_the_other_rows(tmp_path):
+    write_config(tmp_path)
+    seed_state(tmp_path)
+    other = job_id("secret-corp:2")
+    tracker = Tracker(tmp_path, "es", make_tz())
+    tracker.remember(JID, KEY, CHAT, 20, TZ_DAY)
+    tracker.remember(other, "secret-corp:2", CHAT, 20, TZ_DAY)
+    tracker.remember_layout(CHAT, 20, [JID, other], 4, TZ_DAY)
+    tracker.save(NOW)
+    routes = mock_telegram([button(10, callback_data("applied", JID), message_id=20)])
+    await tracker_sync(None, tmp_path, push=False, now=NOW)
+    edit = next(e for e in bodies(routes["edit"]) if e["message_id"] == 20)
+    labels = [[b["text"] for b in row] for row in edit["reply_markup"]["inline_keyboard"]]
+    assert labels == [["» 4 ✅ «", "4 ❌"], ["5 ✅", "5 ❌"]]
+    assert read_csv(tmp_path)[0]["estado"] == "aplicado"
+
+
+@respx.mock
+async def test_grouped_layout_is_learned_from_the_pressed_message(tmp_path):
+    write_config(tmp_path)
+    seed_state(tmp_path)
+    other = job_id("secret-corp:2")
+    from jobfinder.tracker import grouped_keyboard
+
+    update = button(10, callback_data("discarded", other), message_id=30)
+    update["callback_query"]["message"]["reply_markup"] = grouped_keyboard([JID, other], {}, start=11)
+    routes = mock_telegram([update])
+    await tracker_sync(None, tmp_path, push=False, now=NOW)
+    saved = json.loads((tmp_path / "state" / "tracker.json").read_text())
+    assert saved["layouts"][f"{CHAT}:30"]["jids"] == [JID, other] and saved["layouts"][f"{CHAT}:30"]["start"] == 11
+    edit = next(e for e in bodies(routes["edit"]) if e["message_id"] == 30)
+    assert [b["text"] for b in edit["reply_markup"]["inline_keyboard"][1]] == ["12 ✅", "» 12 ❌ «"]
+
+
+# ---------------------------------------------------------- Discord reactions
+DISCORD = "https://discord.com/api/v10"
+CHANNEL = "555"
+
+
+@pytest.fixture
+def discord_env(monkeypatch):
+    monkeypatch.setenv("DISCORD_BOT_TOKEN", "bot-token")
+    monkeypatch.setenv("DISCORD_CHANNEL_ID", CHANNEL)
+    monkeypatch.setenv("DISCORD_WEBHOOK_URL", "https://discord.example.test/hook")
+
+
+def discord_config(tmp_path) -> None:
+    write_config(tmp_path)
+    cfg = (tmp_path / "config.yaml").read_text().replace(
+        "  telegram: {enabled: true}\n", "  discord: {enabled: true, bot: true}\n")
+    (tmp_path / "config.yaml").write_text(cfg)
+
+
+def reactions(**counts: int) -> list[dict]:
+    return [{"emoji": {"name": icon}, "count": n + 1, "me": True} for icon, n in counts.items() if n is not None]
+
+
+@respx.mock
+async def test_discord_bot_posts_one_message_per_job_with_reactions(discord_env):
+    from jobfinder.notify.channels import Discord
+    from jobfinder.sources.http import Http
+
+    from .conftest import make_config
+
+    ids = iter(range(9000000000000000001, 9000000000000000100))
+    post = respx.post(f"{DISCORD}/channels/{CHANNEL}/messages").mock(
+        side_effect=lambda request: httpx.Response(200, json={"id": str(next(ids))}))
+    put = respx.put(url__regex=rf"{DISCORD}/channels/{CHANNEL}/messages/\d+/reactions/.+/@me").mock(
+        return_value=httpx.Response(204))
+    webhook = respx.post("https://discord.example.test/hook").mock(return_value=httpx.Response(204))
+    n = _grouped_note(3)
+    cfg = make_config(notify={"discord": {"enabled": True, "bot": True}})
+    async with Http() as http:
+        await Discord(cfg, http).send(n)
+    assert not webhook.called
+    assert post.call_count == 1 + 3 + 1  # header, one per job, footer
+    assert put.call_count == 6
+    assert [t for _, _, t, _ in n.sent] == [f"discord:{CHANNEL}"] * 3
+    assert "Portales: 3 ofertas nuevas" in bodies(post)[0]["content"] and bodies(post)[1]["embeds"][0]["url"]
+
+
+@respx.mock
+async def test_discord_without_bot_credentials_falls_back_to_the_webhook(monkeypatch):
+    from jobfinder.notify.channels import Discord
+    from jobfinder.sources.http import Http
+
+    from .conftest import make_config
+
+    monkeypatch.delenv("DISCORD_BOT_TOKEN", raising=False)
+    monkeypatch.setenv("DISCORD_WEBHOOK_URL", "https://discord.example.test/hook")
+    webhook = respx.post("https://discord.example.test/hook").mock(return_value=httpx.Response(204))
+    n = _grouped_note(2)
+    async with Http() as http:
+        await Discord(make_config(notify={"discord": {"enabled": True, "bot": True}}), http).send(n)
+    assert webhook.called and not n.sent
+
+
+@respx.mock
+async def test_discord_reactions_feed_the_tracker(tmp_path, discord_env):
+    discord_config(tmp_path)
+    tracker = Tracker(tmp_path, "es", make_tz())
+    other = job_id("secret-corp:2")
+    seed = State(tmp_path)
+    seed.observe(Job("secret-corp", "1", "Product Manager DACH", "https://jobs.example.test/1", "Secret Corp",
+                     locations=["Berlin, Germany"]), NOW)
+    seed.save()
+    tracker.remember(JID, KEY, f"discord:{CHANNEL}", 9000000000000000001, TZ_DAY)
+    tracker.remember(other, "secret-corp:2", f"discord:{CHANNEL}", 9000000000000000002, TZ_DAY)
+    tracker.save(NOW)
+    history = [{"id": "9000000000000000002", "reactions": reactions(**{"✅": 0, "❌": 0})},
+               {"id": "9000000000000000001", "reactions": reactions(**{"✅": 1, "❌": 0})}]
+    route = respx.get(f"{DISCORD}/channels/{CHANNEL}/messages").mock(
+        side_effect=lambda request: httpx.Response(200, json=history))
+    assert await tracker_sync(None, tmp_path, push=False, now=NOW) == 0
+    rows = read_csv(tmp_path)
+    assert [(r["id"], r["estado"], r["empresa"]) for r in rows] == [(JID, "aplicado", "Secret Corp")]
+    assert route.call_count == 1 and route.calls[0].request.headers["authorization"] == "Bot bot-token"
+
+    # somebody edits the CSV by hand and the reaction did not change: the sync does not undo it
+    path = tmp_path / "tracker" / "applications.csv"
+    path.write_text(path.read_text(encoding="utf-8").replace("aplicado", "entrevista", 1), encoding="utf-8")
+    await tracker_sync(None, tmp_path, push=False, now=NOW + timedelta(hours=2))
+    assert read_csv(tmp_path)[0]["estado"] == "entrevista"
+
+    # a new ❌ on the other message is applied; an old ✅ never downgrades an interview
+    history[0]["reactions"] = reactions(**{"✅": 0, "❌": 1})
+    history[1]["reactions"] = reactions(**{"✅": 1, "❌": 1})
+    await tracker_sync(None, tmp_path, push=False, now=NOW + timedelta(hours=4))
+    states = {r["id"]: r["estado"] for r in read_csv(tmp_path)}
+    assert states[other] == "descartado" and states[JID] == "entrevista"

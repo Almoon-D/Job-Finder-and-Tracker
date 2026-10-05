@@ -43,6 +43,7 @@ MESSAGES = {
         "st_discarded": "❌ Descartado",
         "btn_discarded": "❌ Descartar",
         "tracker_saved": "Guardado: {status}",
+        "btn_hint": "Pulsa ✅ si aplicas o ❌ si no te interesa; sin pulsar, queda neutro.",
         "tracker_test": "Prueba: {status} (no se guarda)",
         "test_buttons": "Botones de prueba: pulsa uno y, en la siguiente sincronización (tracker-sync o la "
                         "próxima ejecución), el botón aparecerá marcado.",
@@ -54,7 +55,7 @@ MESSAGES = {
         "pending_follow": "📨 Aplicadas sin novedades desde hace {days}+ días ({n})",
         "pending_none": "Nada pendiente 🎉",
         "since": "desde",
-        "tracker_help": "Botones de cada oferta: ⭐ Interesa · ✅ Aplicado · 🗣 Entrevista · ❌ Descartar.\n"
+        "tracker_help": "Botones de cada oferta: ⭐ Interesa · ✅ Aplicado · 🗣 Entrevista · ❌ Descartar (en los resúmenes, solo ✅ y ❌).\n"
                         "Comandos: /estado (embudo y últimos cambios) · /pendientes (por aplicar y sin respuesta).\n"
                         "Las pulsaciones y comandos se procesan en la siguiente sincronización. El CSV "
                         "tracker/applications.csv del repo privado se puede editar a mano.",
@@ -69,6 +70,9 @@ MESSAGES = {
         "w_discards": "Descartes",
         "w_tracker": "📋 Tracker",
         "w_moves": "Esta semana",
+        "w_accept": "Aceptación (te interesó / total marcadas)",
+        "w_col_wanted": "Te interesó (⭐ ✅)",
+        "w_col_discarded": "Descartadas (❌)",
         "w_sources": "🩺 Fuentes",
         "w_sources_ok": "{ok}/{total} fuentes funcionando",
         "w_top": "Más coincidencias",
@@ -90,6 +94,7 @@ MESSAGES = {
         "r_no_keyword": "sin keyword",
         "r_ai_score": "encaje IA bajo",
         "r_source_family": "familia no permitida en la fuente",
+        "r_ai_unavailable": "IA no disponible (se reintenta)",
         "r_duplicate": "duplicadas",
     },
     "en": {
@@ -127,6 +132,7 @@ MESSAGES = {
         "st_discarded": "❌ Discarded",
         "btn_discarded": "❌ Discard",
         "tracker_saved": "Saved: {status}",
+        "btn_hint": "Tap ✅ if you apply or ❌ if not interested; no tap keeps it neutral.",
         "tracker_test": "Test: {status} (not saved)",
         "test_buttons": "Test buttons: press one and, at the next sync (tracker-sync or the next run), the button "
                         "shows as selected.",
@@ -153,6 +159,9 @@ MESSAGES = {
         "w_discards": "Discarded",
         "w_tracker": "📋 Tracker",
         "w_moves": "This week",
+        "w_accept": "Acceptance (wanted / total marked)",
+        "w_col_wanted": "Wanted (⭐ ✅)",
+        "w_col_discarded": "Discarded (❌)",
         "w_sources": "🩺 Sources",
         "w_sources_ok": "{ok}/{total} sources working",
         "w_top": "Most matches",
@@ -174,6 +183,7 @@ MESSAGES = {
         "r_no_keyword": "no keyword",
         "r_ai_score": "low AI fit",
         "r_source_family": "family not allowed for the source",
+        "r_ai_unavailable": "AI unavailable (retried next run)",
         "r_duplicate": "duplicates",
     },
 }

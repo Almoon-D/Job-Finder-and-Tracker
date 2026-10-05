@@ -245,6 +245,14 @@ class TelegramConfig(_Model):
 class DiscordConfig(_Model):
     enabled: bool = False
     webhook_env: str = "DISCORD_WEBHOOK_URL"
+    bot: bool = Field(
+        False,
+        description="Post one message per job through a Discord bot with ✅ ❌ reactions that feed the tracker "
+                    "(webhooks cannot carry buttons or read reactions). Falls back to the webhook digest if the "
+                    "bot credentials are missing.",
+    )
+    bot_token_env: str = "DISCORD_BOT_TOKEN"
+    channel_id_env: str = "DISCORD_CHANNEL_ID"
 
 
 class EmailConfig(_Model):
@@ -281,9 +289,11 @@ class NotifyConfig(_Model):
 
 
 class TrackerConfig(_Model):
-    """Application tracker: Telegram buttons on per-job messages, kept in tracker/applications.csv."""
+    """Application tracker: Telegram buttons and Discord reactions, kept in tracker/applications.csv."""
 
-    enabled: bool = Field(True, description="Buttons and sync (only when notify.telegram is enabled).")
+    enabled: bool = Field(
+        True, description="Buttons/reactions and sync (needs notify.telegram enabled or notify.discord.bot on)."
+    )
     follow_up_days: int = Field(
         14, ge=1, description="/pendientes also lists applications without changes for this many days."
     )

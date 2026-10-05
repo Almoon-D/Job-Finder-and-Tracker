@@ -79,6 +79,29 @@ async def test_workday(tmp_path):
 
 
 @respx.mock
+async def test_workday_country_facet_reaches_configured_cities(tmp_path):
+    """A tenant whose only location facet is the country ('Switzerland') still yields its Geneva jobs."""
+    api = "https://bank.wd3.myworkdayjobs.com/wday/cxs/bank/Careers"
+    facets = [{"facetParameter": "Location", "values": [{"descriptor": "Switzerland", "id": "ch", "count": 2},
+                                                        {"descriptor": "United States", "id": "us", "count": 9}]}]
+    postings = [{"title": "Relationship Manager - Romandie", "externalPath": "/job/Geneve/RM_1",
+                 "locationsText": "Genève / Rue du Rhône 31", "postedOn": "Posted Today"},
+                {"title": "Analyst", "externalPath": "/job/Zurich/A_2", "locationsText": "Zurich",
+                 "postedOn": "Posted Today"}]
+    route = respx.post(f"{api}/jobs").mock(side_effect=lambda request: httpx.Response(
+        200, json={"total": 2, "jobPostings": postings if json.loads(request.content)["appliedFacets"] else [],
+                   "facets": facets}))
+    cfg_locations = [{"city": "Geneva", "country": "CH", "aliases": ["Genève"]}]
+    ctx = ctx_for(tmp_path, url="https://bank.wd3.myworkdayjobs.com/Careers")
+    ctx.locations = LocationMatcher(make_config(locations=cfg_locations).locations, ctx.config.coverage)
+    jobs = await build_adapter(ctx).fetch()
+    assert json.loads(route.calls[1].request.content)["appliedFacets"] == {"Location": ["ch"]}
+    assert {j.title for j in jobs} == {"Relationship Manager - Romandie", "Analyst"}  # narrowed later by location
+    assert ctx.locations.match_location("Genève / Rue du Rhône 31") and not ctx.locations.match_location("Zurich")
+    await ctx.http.aclose()
+
+
+@respx.mock
 async def test_oracle(tmp_path):
     respx.get(url__regex=r"https://acme\.fa\.oraclecloud\.com/hcmRestApi/.*").mock(
         return_value=httpx.Response(200, text=fixture_text("oracle.json")))

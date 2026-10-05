@@ -13,7 +13,7 @@ nothing about what its owner is looking for.
 | `runs/last_run.json`, `runs/config_error.txt`: run details and errors | Private data repo | You |
 | `runs/stats.json`: daily counts per group and source (for the weekly summary) | Private data repo | You |
 | `tracker/applications.csv`: jobs you marked, status, dates, notes, history | Private data repo | You |
-| `state/tracker.json`: Telegram update offset, ids of messages with buttons | Private data repo | You |
+| `state/tracker.json`: Telegram update offset, ids of messages with buttons or Discord reactions, layout of grouped digests | Private data repo | You |
 | `reports/weekly/`: weekly summaries | Private data repo | You |
 | `feeds/`: JSON Feed, RSS, summary and tracker JSON for dashboards | Private data repo | You (and dashboards with a read-only token) |
 | Tokens and API keys | GitHub Secrets of the public repo | Only the workflow (masked in logs) |

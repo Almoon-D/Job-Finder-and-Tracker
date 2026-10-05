@@ -240,8 +240,8 @@ class Runner:
                 if v is None:  # AI unavailable: fall back to keywords
                     if job.family:
                         kept.append((job, source))
-                    else:
-                        out.reject("no_keyword")
+                    else:  # not cached, so the next run retries it while it is still fresh
+                        out.reject("ai_unavailable")
                     continue
                 self.state.store_verdict(job, self.criteria, v)
                 self._apply(job, v)
